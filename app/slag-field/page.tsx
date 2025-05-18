@@ -13,19 +13,19 @@ import { useToast } from "@/hooks/use-toast"
 import type { SlagFieldPlace, SlagFieldState, MaterialSetting } from "@/lib/types"
 import {
   fetchPlaces,
-  updatePlace,
   fetchSlagFieldStates,
   placeBucket,
   emptyBucket,
   removeBucket,
   invalidateState,
   fetchMaterialSettings,
+  markPlaceInUse,
+  markPlaceOutOfUse,
 } from "@/lib/data-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { dataStore } from "@/lib/data-store"
 
 export default function SlagFieldPage() {
   const { toast } = useToast()
@@ -56,6 +56,7 @@ export default function SlagFieldPage() {
   useEffect(() => {
     const loadData = async () => {
       try {
+        setLoading(true)
         // Fetch places from the Places directory
         const placesData = await fetchPlaces()
         setPlaces(placesData)
@@ -87,7 +88,7 @@ export default function SlagFieldPage() {
     return states.find((s) => s.placeId === placeId && s.endDate === null)
   }
 
-  // Calculate elapsed time since bucket placement
+  // Исправим функцию getElapsedTime, чтобы таймер начинался с 00:00
   const getElapsedTime = (startDate: Date | string) => {
     // Ensure we're working with a Date object
     const start = startDate instanceof Date ? startDate : new Date(startDate)
@@ -97,7 +98,11 @@ export default function SlagFieldPage() {
       return "0:00"
     }
 
-    const diffMs = currentTime.getTime() - start.getTime()
+    // Получаем текущее время в UTC+0
+    const now = new Date()
+    // Вычисляем разницу в миллисекундах
+    const diffMs = now.getTime() - start.getTime()
+    // Преобразуем в часы и минуты
     const diffHrs = Math.floor(diffMs / (1000 * 60 * 60))
     const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
 
@@ -115,8 +120,41 @@ export default function SlagFieldPage() {
     return diffMs / (1000 * 60 * 60)
   }
 
+  // Функция для проверки, можно ли опустошить ковш
+  const canEmptyBucket = (placeId: string) => {
+    const placeState = getPlaceState(placeId)
+    if (!placeState || placeState.state !== "BucketPlaced") return false
+
+    // Получаем настройки материала
+    const materialSettingsForMaterial = materialSettings.filter(
+        (setting) => setting.materialId === placeState.materialId,
+    )
+
+    // Находим максимальную длительность для этого материала
+    const maxDuration = materialSettingsForMaterial.length > 0 ? materialSettingsForMaterial[0].duration : 0
+    const maxDurationHours = maxDuration / 60 // Convert minutes to hours
+
+    // Проверяем, прошло ли достаточно времени
+    const elapsedHours = getElapsedHours(placeState.startDate)
+
+    // Находим последнюю стадию охлаждения (обычно зеленый цвет)
+    const lastStage = materialSettingsForMaterial.reduce((latest, setting) => {
+      if (setting.maxHours !== undefined && (!latest || setting.maxHours > latest.maxHours!)) {
+        return setting
+      }
+      return latest
+    }, materialSettingsForMaterial[0])
+
+    // Проверяем, находится ли время в последней стадии или превышено
+    const isInLastStage = lastStage && lastStage.minHours !== undefined && elapsedHours >= lastStage.minHours
+    const isOverTime = elapsedHours >= maxDurationHours
+
+    return isInLastStage || isOverTime
+  }
+
   const handlePlaceBucket = async (data: any) => {
     try {
+      setLoading(true)
       const success = await placeBucket({
         placeId: selectedPlace?.id || "",
         bucketId: data.bucketId,
@@ -132,7 +170,7 @@ export default function SlagFieldPage() {
 
         toast({
           title: "Ковш установлен",
-          description: `Ковш установлен на место ${selectedPlace?.row} ${selectedPlace?.number}`,
+          description: `Ковш установлен на место ${selectedPlace?.row || ""} ${selectedPlace?.number || ""}`,
         })
       } else {
         toast({
@@ -142,17 +180,34 @@ export default function SlagFieldPage() {
         })
       }
     } catch (error) {
+      console.error("Error placing bucket:", error)
       toast({
         title: "Ошибка",
         description: "Произошла ошибка при установке ковша",
         variant: "destructive",
       })
+    } finally {
+      setLoading(false)
+      setIsPlaceBucketOpen(false)
     }
-    setIsPlaceBucketOpen(false)
   }
 
   const handleEmptyBucket = async (data: any) => {
     try {
+      setLoading(true)
+
+      // Проверяем, можно ли опустошить ковш
+      if (!selectedPlace || !canEmptyBucket(selectedPlace.id)) {
+        toast({
+          title: "Невозможно опустошить ковш",
+          description: `Время охлаждения материала еще не завершилось. Опустошение возможно только на последней стадии охлаждения.`,
+          variant: "destructive",
+        })
+        //setLoading(false)
+        setIsEmptyBucketOpen(false)
+        return
+      }
+
       const success = await emptyBucket({
         placeId: selectedPlace?.id || "",
         endDate: data.endDate,
@@ -161,31 +216,59 @@ export default function SlagFieldPage() {
       if (success) {
         // Обновляем состояния
         const statesData = (await fetchSlagFieldStates()) as SlagFieldState[]
-        setStates(statesData)
+
+        // Обновляем состояние вручную, чтобы гарантировать, что оно изменится на "BucketEmptied"
+        const updatedStates = statesData.map((state) => {
+          if (state.placeId === selectedPlace?.id) {
+            return {
+              ...state,
+              state: "BucketEmptied",
+              endDate:data.endDate
+            }
+          }
+          return state
+        })
+
+        setStates(updatedStates)
 
         toast({
-          title: "Ковш опорожнен",
-          description: `Ковш опорожнен на месте ${selectedPlace?.row} ${selectedPlace?.number}`,
+          title: "Ковш опустошен",
+          description: `Ковш опустошен на месте ${selectedPlace?.row || ""} ${selectedPlace?.number || ""}`,
         })
       } else {
         toast({
           title: "Ошибка",
-          description: "Не удалось опорожнить ковш",
+          description: "Не удалось опустошить ковш",
           variant: "destructive",
         })
       }
     } catch (error) {
+      console.error("Error emptying bucket:", error)
       toast({
         title: "Ошибка",
-        description: "Произошла ошибка при опорожнении ковша",
+        description: "Произошла ошибка при опустошении ковша",
         variant: "destructive",
       })
+    } finally {
+      setLoading(false)
+      setIsEmptyBucketOpen(false)
     }
-    setIsEmptyBucketOpen(false)
   }
 
   const handleRemoveBucket = async () => {
     try {
+      setLoading(true)
+      // Проверяем, прошло ли достаточно времени для удаления ковша
+      const placeState = getPlaceState(selectedPlace?.id || "")
+
+      if (placeState?.state !== "BucketEmptied") {
+        toast({
+          title: "Невозможно убрать ковш",
+          description: "Ковш должен быть опустошен перед удалением",
+          variant: "destructive",
+        })
+        return
+      }
       const success = await removeBucket(selectedPlace?.id || "")
 
       if (success) {
@@ -195,7 +278,7 @@ export default function SlagFieldPage() {
 
         toast({
           title: "Ковш убран",
-          description: `Ковш убран с места ${selectedPlace?.row} ${selectedPlace?.number}`,
+          description: `Ковш убран с места ${selectedPlace?.row || ""} ${selectedPlace?.number || ""}`,
         })
       } else {
         toast({
@@ -205,17 +288,21 @@ export default function SlagFieldPage() {
         })
       }
     } catch (error) {
+      console.error("Error removing bucket:", error)
       toast({
         title: "Ошибка",
         description: "Произошла ошибка при удалении ковша",
         variant: "destructive",
       })
+    } finally {
+      setLoading(false)
+      setIsRemoveBucketOpen(false)
     }
-    setIsRemoveBucketOpen(false)
   }
 
   const handleInvalid = async (data: any) => {
     try {
+      setLoading(true)
       const success = await invalidateState({
         placeId: selectedPlace?.id || "",
         description: data.description,
@@ -228,7 +315,7 @@ export default function SlagFieldPage() {
 
         toast({
           title: "Состояние очищено",
-          description: `Состояние места ${selectedPlace?.row} ${selectedPlace?.number} очищено: ${data.description}`,
+          description: `Состояние места ${selectedPlace?.row || ""} ${selectedPlace?.number || ""} очищено: ${data.description}`,
         })
       } else {
         toast({
@@ -238,90 +325,85 @@ export default function SlagFieldPage() {
         })
       }
     } catch (error) {
+      console.error("Error invalidating state:", error)
       toast({
         title: "Ошибка",
         description: "Произошла ошибка при очистке состояния",
         variant: "destructive",
       })
+    } finally {
+      setLoading(false)
+      setIsInvalidOpen(false)
     }
-    setIsInvalidOpen(false)
   }
-
-  // Найдем методы handleWentInUse и handleOutOfUse и исправим их, чтобы они правильно записывали действия в историю
 
   // Обновим метод handleWentInUse
   const handleWentInUse = async (placeId: string) => {
-    // Find the place to update
-    const placeToUpdate = places.find((p) => p.id === placeId)
-    if (!placeToUpdate) return
-
-    // Update the place
-    const updatedPlace = { ...placeToUpdate, isEnable: true }
-
     try {
-      // Update on the server
-      await updatePlace(updatedPlace)
+      setLoading(true)
+      // Вызываем API для отметки места как используемое
+      const success = await markPlaceInUse(placeId)
 
-      // Update local state
-      const updatedPlaces = places.map((place) => (place.id === placeId ? updatedPlace : place))
-      setPlaces(updatedPlaces)
+      if (success) {
+        // Обновляем локальное состояние
+        const updatedPlaces = places.map((place) => (place.id === placeId ? { ...place, isEnable: true } : place))
+        setPlaces(updatedPlaces)
 
-      // Явно добавляем запись в историю с правильным action
-      dataStore.addToHistory(
-        "enablePlace",
-        "place",
-        placeId,
-        `Место ${placeToUpdate.row * 100 + placeToUpdate.number} отмечено как используемое`,
-      )
-
-      toast({
-        title: "Место используется",
-        description: "Место отмечено как используемое",
-      })
+        toast({
+          title: "Место используется",
+          description: "Место отмечено как используемое",
+        })
+      } else {
+        toast({
+          title: "Ошибка",
+          description: "Не удалось обновить статус места",
+          variant: "destructive",
+        })
+      }
     } catch (error) {
+      console.error("Error marking place as in use:", error)
       toast({
         title: "Ошибка",
         description: "Не удалось обновить статус места",
         variant: "destructive",
       })
+    } finally {
+      setLoading(false)
     }
   }
 
   // Обновим метод handleOutOfUse
   const handleOutOfUse = async (placeId: string) => {
-    // Find the place to update
-    const placeToUpdate = places.find((p) => p.id === placeId)
-    if (!placeToUpdate) return
-
-    // Update the place
-    const updatedPlace = { ...placeToUpdate, isEnable: false }
-
     try {
-      // Update on the server
-      await updatePlace(updatedPlace)
+      setLoading(true)
+      // Вызываем API для отметки места как неиспользуемое
+      const success = await markPlaceOutOfUse(placeId)
 
-      // Update local state
-      const updatedPlaces = places.map((place) => (place.id === placeId ? updatedPlace : place))
-      setPlaces(updatedPlaces)
+      if (success) {
+        // Обновляем локальное состояние
+        const updatedPlaces = places.map((place) => (place.id === placeId ? { ...place, isEnable: false } : place))
+        setPlaces(updatedPlaces)
 
-      // Явно добавляем запись в историю с правильным action
-      dataStore.addToHistory(
-        "disablePlace",
-        "place",
-        placeId,
-        `Место ${placeToUpdate.row * 100 + placeToUpdate.number} отмечено как неиспользуемое`,
-      )
-
-      toast({
-        title: "Место не используется",
-        description: "Место отмечено как неиспользуемое",
-      })
+        toast({
+          title: "Место не используется",
+          description: "Место отмечено как неиспользуемое",
+        })
+      } else {
+        toast({
+          title: "Ошибка",
+          description: "Не удалось обновить статус места",
+          variant: "destructive",
+        })
+      }
     } catch (error) {
+      console.error("Error marking place as out of use:", error)
       toast({
         title: "Ошибка",
         description: "Не удалось обновить статус места",
         variant: "destructive",
       })
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -331,20 +413,18 @@ export default function SlagFieldPage() {
     setIsInfoModalOpen(true)
   }
 
-  // Остальной код остается без изменений...
-  // ...
-
   // Group places by row
   const placesByRow = places.reduce(
-    (acc, place) => {
-      const rowKey = place.row.toString()
-      if (!acc[rowKey]) {
-        acc[rowKey] = []
-      }
-      acc[rowKey].push(place)
-      return acc
-    },
-    {} as Record<string, SlagFieldPlace[]>,
+      (acc, place) => {
+        // Проверяем, что place.row существует и не undefined
+        const rowKey = place.row?.toString() || "0"
+        if (!acc[rowKey]) {
+          acc[rowKey] = []
+        }
+        acc[rowKey].push(place)
+        return acc
+      },
+      {} as Record<string, SlagFieldPlace[]>,
   )
 
   // Update the getPlaceClass function to have consistent borders
@@ -367,16 +447,16 @@ export default function SlagFieldPage() {
 
     // Найдем все настройки для этого материала
     const materialSettingsForMaterial = materialSettings.filter(
-      (setting) => setting.materialId === placeState.materialId && setting.visualStateCode,
+        (setting) => setting.materialId === placeState.materialId && setting.visualStateCode,
     )
 
     // Найдем настройку, которая соответствует текущему времени
     return materialSettingsForMaterial.find(
-      (setting) =>
-        setting.minHours !== undefined &&
-        setting.maxHours !== undefined &&
-        elapsedHours >= setting.minHours &&
-        elapsedHours < setting.maxHours,
+        (setting) =>
+            setting.minHours !== undefined &&
+            setting.maxHours !== undefined &&
+            elapsedHours >= setting.minHours &&
+            elapsedHours < setting.maxHours,
     )
   }
 
@@ -430,7 +510,7 @@ export default function SlagFieldPage() {
       materialName: state.materialName || "Неизвестный материал",
       startDate: new Date(state.startDate).toLocaleString(),
       weight: (state.weight / 1000).toFixed(2) + " т",
-      state: state.state === "BucketPlaced" ? "Установлен" : "Опорожнен",
+      state: state.state || "Неизвестно",
       elapsedTime,
       elapsedHours: elapsedHours.toFixed(1),
       visualStateCode: materialSetting?.visualStateCode || "Не определен",
@@ -446,8 +526,14 @@ export default function SlagFieldPage() {
       // Place exists but not in use - show disabled image
       return <img src="/images/disabled.png" alt="Не используется" className="h-16 w-16 sm:h-16 sm:w-16" />
     } else if (getPlaceState(place.id)) {
-      // Place has a bucket - show appropriate image based on state and material setting
       const placeState = getPlaceState(place.id)
+
+      // Если ковш опорожнен, показываем изображение пустого ковша
+      if (placeState?.state === "BucketEmptied") {
+        return <img src="/images/empty_bucket.png" alt="Опорожнен" className="h-16 w-16 sm:h-16 sm:w-16" />
+      }
+
+      // Place has a bucket - show appropriate image based on state and material setting
       const elapsedHours = getElapsedHours(placeState!.startDate)
 
       // Найдем все настройки для этого материала
@@ -461,7 +547,7 @@ export default function SlagFieldPage() {
       // If the bucket exceeds its material's duration, show a blinking green bucket
       if (exceedsDuration) {
         return (
-          <img src="/images/green.png" alt="Превышено время" className="h-16 w-16 sm:h-16 sm:w-16 blink-animation" />
+            <img src="/images/green.png" alt="Превышено время" className="h-16 w-16 sm:h-16 sm:w-16 blink-animation" />
         )
       }
 
@@ -512,7 +598,7 @@ export default function SlagFieldPage() {
     // Создаем контекстное меню
     const menu = document.createElement("div")
     menu.className =
-      "absolute z-50 bg-white dark:bg-gray-800 shadow-xl rounded-md py-2 min-w-[200px] slag-field-context-menu"
+        "absolute z-50 bg-white dark:bg-gray-800 shadow-xl rounded-md py-2 min-w-[200px] slag-field-context-menu"
 
     // Добавляем стили для более заметного меню
     menu.style.cssText = `
@@ -531,15 +617,18 @@ export default function SlagFieldPage() {
 
     // Общий класс для элементов меню
     const menuItemClass =
-      "px-4 py-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-primary cursor-pointer flex items-center transition-colors duration-150"
+        "px-4 py-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-primary cursor-pointer flex items-center transition-colors duration-150"
 
     // Add menu items
     if (place.isEnable) {
-      if (!getPlaceState(place.id)) {
+      const placeState = getPlaceState(place.id)
+
+      // Если место свободно, показываем опцию "Установить ковш"
+      if (!placeState) {
         const placeItem = document.createElement("div")
         placeItem.className = menuItemClass
         placeItem.innerHTML =
-          '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"></path><path d="M16.5 9.4 7.55 4.24"></path><polyline points="3.29 7 12 12 20.71 7"></polyline><line x1="12" y1="22" x2="12" y2="12"></line></svg> Установить ковш'
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"></path><path d="M16.5 9.4 7.55 4.24"></path><polyline points="3.29 7 12 12 20.71 7"></polyline><line x1="12" y1="22" x2="12" y2="12"></line></svg> Установить ковш'
         placeItem.onclick = () => {
           document.body.removeChild(menu)
           setIsPlaceBucketOpen(true)
@@ -547,23 +636,34 @@ export default function SlagFieldPage() {
         menu.appendChild(placeItem)
       }
 
-      if (getPlaceState(place.id)?.state === "BucketPlaced") {
+      // Если ковш установлен (BucketPlaced), показываем опцию "Опорожнить ковш"
+      if (placeState?.state === "BucketPlaced") {
         const emptyItem = document.createElement("div")
         emptyItem.className = menuItemClass
         emptyItem.innerHTML =
-          '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> Опорожнить ковш'
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> Опустошить ковш'
         emptyItem.onclick = () => {
           document.body.removeChild(menu)
+          if (!canEmptyBucket(place.id)) {
+            toast({
+              title: "Невозможно опустошить ковш",
+              description: `Время охлаждения материала еще не завершилось. Опустошение возможно только на последней стадии охлаждения.`,
+              variant: "destructive",
+            })
+            return
+          }
+
           setIsEmptyBucketOpen(true)
         }
         menu.appendChild(emptyItem)
       }
 
-      if (getPlaceState(place.id)?.state === "BucketEmptied") {
+      // Если ковш опорожнен (BucketEmptied), показываем опцию "Убрать ковш"
+      if (placeState?.state === "BucketEmptied") {
         const removeItem = document.createElement("div")
         removeItem.className = menuItemClass
         removeItem.innerHTML =
-          '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg> Убрать ковш'
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg> Убрать ковш'
         removeItem.onclick = () => {
           document.body.removeChild(menu)
           setIsRemoveBucketOpen(true)
@@ -571,11 +671,11 @@ export default function SlagFieldPage() {
         menu.appendChild(removeItem)
       }
 
-      if (getPlaceState(place.id)) {
+      if (placeState) {
         const invalidItem = document.createElement("div")
         invalidItem.className = menuItemClass
         invalidItem.innerHTML =
-          '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg> Очистить'
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg> Очистить'
         invalidItem.onclick = () => {
           document.body.removeChild(menu)
           setIsInvalidOpen(true)
@@ -584,11 +684,11 @@ export default function SlagFieldPage() {
       }
 
       // Only show "Не используется" option if there's no bucket on the place
-      if (!getPlaceState(place.id)) {
+      if (!placeState) {
         const disableItem = document.createElement("div")
         disableItem.className = menuItemClass
         disableItem.innerHTML =
-          '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg> Не используется'
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg> Не используется'
         disableItem.onclick = () => {
           document.body.removeChild(menu)
           handleOutOfUse(place.id)
@@ -599,7 +699,7 @@ export default function SlagFieldPage() {
       const enableItem = document.createElement("div")
       enableItem.className = menuItemClass
       enableItem.innerHTML =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg> Используется'
+          '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg> Используется'
       enableItem.onclick = () => {
         document.body.removeChild(menu)
         handleWentInUse(place.id)
@@ -645,215 +745,225 @@ export default function SlagFieldPage() {
 
   if (loading) {
     return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-[80vh]">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-        </div>
-      </DashboardLayout>
+        <DashboardLayout>
+          <div className="flex items-center justify-center h-[80vh]">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          </div>
+        </DashboardLayout>
     )
   }
 
   // Обновляем отображение карты шлакового поля
   return (
-    <DashboardLayout>
-      <div className="flex flex-col gap-6 animate-slide-up">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-              Карта шлакового поля
-            </h1>
+      <DashboardLayout>
+        <div className="flex flex-col gap-6 animate-slide-up">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
+                Карта шлакового поля
+              </h1>
+            </div>
           </div>
+
+          {Object.entries(placesByRow).length > 0 ? (
+              <div className="space-y-6">
+                {Object.entries(placesByRow).map(([rowKey, rowPlaces]) => (
+                    <Card key={rowKey} className="overflow-hidden border-none shadow-lg">
+                      {/* Gradient top border */}
+                      <div className="h-1 bg-gradient-to-r from-blue-600 via-primary to-blue-400"></div>
+
+                      <CardHeader className="pb-2 bg-gradient-to-b from-blue-50 to-transparent dark:from-blue-950/20 dark:to-transparent">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+                              <Grid3X3 className="h-4 w-4" />
+                            </div>
+                            <CardTitle className="text-xl font-bold">Ряд {rowKey}</CardTitle>
+                            <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none">
+                              {rowPlaces.length} мест
+                            </Badge>
+                          </div>
+                          <Badge
+                              variant="outline"
+                              className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800"
+                          >
+                            Активных: {rowPlaces.filter((p) => p.isEnable).length}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-4 bg-white dark:bg-card">
+                        <div className="relative w-full">
+                          <div className="overflow-x-auto pb-4 scrollbar-container w-full">
+                            <div className="flex flex-nowrap space-x-4 px-1 py-1">
+                              {rowPlaces.map((place) => {
+                                const stateInfo = getPlaceStateInfo(place)
+                                const placeState = getPlaceState(place.id)
+
+                                // Calculate elapsed time if there's a bucket placed
+                                let elapsedTime = null
+                                if (placeState && placeState.startDate) {
+                                  elapsedTime = getElapsedTime(placeState.startDate)
+                                }
+
+                                // Обновим отображение мест в ряду, чтобы они были выровнены по одной линии
+                                return (
+                                    <TooltipProvider key={place.id}>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <div className="flex flex-col items-center h-full">
+                                            {/* Фиксированная высота для верхней части (для времени) */}
+                                            <div className="h-6 flex items-center justify-center mb-1">
+                                              {elapsedTime && (
+                                                  <div className="text-xs font-medium text-white bg-primary px-2 py-0.5 rounded-md shadow-sm">
+                                                    {elapsedTime}
+                                                  </div>
+                                              )}
+                                            </div>
+                                            {/* Контейнер для места с фиксированной высотой */}
+                                            <div
+                                                className={`${getPlaceClass(place)} w-20 h-20 sm:w-24 sm:h-24 rounded-lg flex items-center justify-center bg-card relative`}
+                                                onContextMenu={(e) => createContextMenu(e, place)}
+                                            >
+                                              {renderIcon(place)}
+                                            </div>
+                                            <div className="mt-1 flex items-center justify-center relative">
+                                      <span className="text-sm font-medium">
+                                        {/* Проверяем, что place.row и place.number существуют */}
+                                        {place.row !== undefined && place.number !== undefined
+                                            ? place.row * 100 + place.number
+                                            : "N/A"}
+                                      </span>
+                                              {getPlaceState(place.id) && (
+                                                  <button
+                                                      onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        openInfoModal(place)
+                                                      }}
+                                                      className="absolute -right-6 flex items-center justify-center h-5 w-5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
+                                                  >
+                                                    <Info className="h-3 w-3" />
+                                                  </button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </TooltipTrigger>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                ))}
+              </div>
+          ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <h3 className="text-lg font-medium">Нет данны</h3>
+                <p className="text-muted-foreground">Не найдено мест для отображения</p>
+              </div>
+          )}
         </div>
 
-        {Object.entries(placesByRow).length > 0 ? (
-          <div className="space-y-6">
-            {Object.entries(placesByRow).map(([rowKey, rowPlaces]) => (
-              <Card key={rowKey} className="overflow-hidden border-none shadow-lg">
-                {/* Gradient top border */}
-                <div className="h-1 bg-gradient-to-r from-blue-600 via-primary to-blue-400"></div>
-
-                <CardHeader className="pb-2 bg-gradient-to-b from-blue-50 to-transparent dark:from-blue-950/20 dark:to-transparent">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                        <Grid3X3 className="h-4 w-4" />
-                      </div>
-                      <CardTitle className="text-xl font-bold">Ряд {rowKey}</CardTitle>
-                      <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none">
-                        {rowPlaces.length} мест
-                      </Badge>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800"
-                    >
-                      Активных: {rowPlaces.filter((p) => p.isEnable).length}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-4 bg-white dark:bg-card">
-                  <div className="relative w-full">
-                    <div className="overflow-x-auto pb-4 scrollbar-container w-full">
-                      <div className="flex flex-nowrap space-x-4 px-1 py-1">
-                        {rowPlaces.map((place) => {
-                          const stateInfo = getPlaceStateInfo(place)
-                          const placeState = getPlaceState(place.id)
-
-                          // Calculate elapsed time if there's a bucket placed
-                          let elapsedTime = null
-                          if (placeState && placeState.startDate) {
-                            elapsedTime = getElapsedTime(placeState.startDate)
-                          }
-
-                          // Обновим отображение мест в ряду, чтобы они были выровнены по одной линии
-                          return (
-                            <TooltipProvider key={place.id}>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div className="flex flex-col items-center h-full">
-                                    {/* Фиксированная высота для верхней части (для времени) */}
-                                    <div className="h-6 flex items-center justify-center mb-1">
-                                      {elapsedTime && (
-                                        <div className="text-xs font-medium text-white bg-primary px-2 py-0.5 rounded-md shadow-sm">
-                                          {elapsedTime}
-                                        </div>
-                                      )}
-                                    </div>
-                                    {/* Контейнер для места с фиксированной высотой */}
-                                    <div
-                                      className={`${getPlaceClass(place)} w-20 h-20 sm:w-24 sm:h-24 rounded-lg flex items-center justify-center bg-card relative`}
-                                      onContextMenu={(e) => createContextMenu(e, place)}
-                                    >
-                                      {renderIcon(place)}
-                                    </div>
-                                    <div className="mt-1 flex items-center justify-center relative">
-                                      <span className="text-sm font-medium">{place.row * 100 + place.number}</span>
-                                      {getPlaceState(place.id) && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            openInfoModal(place)
-                                          }}
-                                          className="absolute -right-6 flex items-center justify-center h-5 w-5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-colors"
-                                        >
-                                          <Info className="h-3 w-3" />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                </TooltipTrigger>
-                              </Tooltip>
-                            </TooltipProvider>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <h3 className="text-lg font-medium">Нет данны</h3>
-            <p className="text-muted-foreground">Не найдено мест для отображения</p>
-          </div>
-        )}
-      </div>
-
-      {infoPlace && (
-        <Dialog open={isInfoModalOpen} onOpenChange={setIsInfoModalOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Информация о месте {infoPlace.row * 100 + infoPlace.number}</DialogTitle>
-            </DialogHeader>
-            {(() => {
-              const stateInfo = getPlaceStateInfo(infoPlace)
-              if (!stateInfo) {
-                return (
-                  <div className="py-6 text-center">
-                    <p>На этом месте нет ковша</p>
-                  </div>
-                )
-              }
-
-              // Update the info modal to show duration information
-              return (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div className="font-medium text-muted-foreground">Ковш:</div>
-                    <div>{stateInfo.bucketDescription}</div>
-
-                    <div className="font-medium text-muted-foreground">Материал:</div>
-                    <div>{stateInfo.materialName}</div>
-
-                    <div className="font-medium text-muted-foreground">Дата установки:</div>
-                    <div>{stateInfo.startDate}</div>
-
-                    <div className="font-medium text-muted-foreground">Прошло времени:</div>
-                    <div>
-                      {stateInfo.elapsedTime} ({stateInfo.elapsedHours} ч)
-                    </div>
-
-                    {stateInfo.exceedsMaxDuration && (
-                      <>
-                        <div className="font-medium text-red-500">Внимание:</div>
-                        <div className="text-red-500 font-semibold">
-                          Превышено максимальное время ({stateInfo.maxDurationHours} ч)
+        {infoPlace && (
+            <Dialog open={isInfoModalOpen} onOpenChange={setIsInfoModalOpen}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>
+                    Информация о месте{" "}
+                    {infoPlace.row !== undefined && infoPlace.number !== undefined
+                        ? infoPlace.row * 100 + infoPlace.number
+                        : "N/A"}
+                  </DialogTitle>
+                </DialogHeader>
+                {(() => {
+                  const stateInfo = getPlaceStateInfo(infoPlace)
+                  if (!stateInfo) {
+                    return (
+                        <div className="py-6 text-center">
+                          <p>На этом месте нет ковша</p>
                         </div>
-                      </>
-                    )}
+                    )
+                  }
 
-                    <div className="font-medium text-muted-foreground">Вес:</div>
-                    <div>{stateInfo.weight}</div>
+                  // Update the info modal to show duration information
+                  return (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div className="font-medium text-muted-foreground">Ковш:</div>
+                          <div>{stateInfo.bucketDescription}</div>
 
-                    <div className="font-medium text-muted-foreground">Статус:</div>
-                    <div>{stateInfo.state}</div>
+                          <div className="font-medium text-muted-foreground">Материал:</div>
+                          <div>{stateInfo.materialName}</div>
 
-                    <div className="font-medium text-muted-foreground">Визуальный код:</div>
-                    <div className="flex items-center">
-                      <div className={`h-6 w-6 mr-2 rounded-md ${getIconColorClass(infoPlace)}`}></div>
-                      {stateInfo.visualStateCode} ({stateInfo.timeRange})
-                    </div>
-                  </div>
-                </div>
-              )
-            })()}
-          </DialogContent>
-        </Dialog>
-      )}
+                          <div className="font-medium text-muted-foreground">Дата установки:</div>
+                          <div>{stateInfo.startDate}</div>
 
-      {selectedPlace && (
-        <>
-          <PlaceBucketModal
-            isOpen={isPlaceBucketOpen}
-            onClose={() => setIsPlaceBucketOpen(false)}
-            onSubmit={handlePlaceBucket}
-            place={selectedPlace}
-          />
+                          <div className="font-medium text-muted-foreground">Прошло времени:</div>
+                          <div>
+                            {stateInfo.elapsedTime} ({stateInfo.elapsedHours} ч)
+                          </div>
 
-          <EmptyBucketModal
-            isOpen={isEmptyBucketOpen}
-            onClose={() => setIsEmptyBucketOpen(false)}
-            onSubmit={handleEmptyBucket}
-            place={selectedPlace}
-          />
+                          {stateInfo.exceedsMaxDuration && (
+                              <>
+                                <div className="font-medium text-red-500">Внимание:</div>
+                                <div className="text-red-500 font-semibold">
+                                  Превышено максимальное время ({stateInfo.maxDurationHours} ч)
+                                </div>
+                              </>
+                          )}
 
-          <RemoveBucketModal
-            isOpen={isRemoveBucketOpen}
-            onClose={() => setIsRemoveBucketOpen(false)}
-            onSubmit={handleRemoveBucket}
-            place={selectedPlace}
-          />
+                          <div className="font-medium text-muted-foreground">Вес:</div>
+                          <div>{stateInfo.weight}</div>
 
-          <InvalidModal
-            isOpen={isInvalidOpen}
-            onClose={() => setIsInvalidOpen(false)}
-            onSubmit={handleInvalid}
-            place={selectedPlace}
-          />
-        </>
-      )}
-    </DashboardLayout>
+                          <div className="font-medium text-muted-foreground">Статус:</div>
+                          <div>{stateInfo.state}</div>
+
+                          <div className="font-medium text-muted-foreground">Визуальный код:</div>
+                          <div className="flex items-center">
+                            <div className={`h-6 w-6 mr-2 rounded-md ${getIconColorClass(infoPlace)}`}></div>
+                            {stateInfo.visualStateCode} ({stateInfo.timeRange})
+                          </div>
+                        </div>
+                      </div>
+                  )
+                })()}
+              </DialogContent>
+            </Dialog>
+        )}
+
+        {selectedPlace && (
+            <>
+              <PlaceBucketModal
+                  isOpen={isPlaceBucketOpen}
+                  onClose={() => setIsPlaceBucketOpen(false)}
+                  onSubmit={handlePlaceBucket}
+                  place={selectedPlace}
+              />
+
+              <EmptyBucketModal
+                  isOpen={isEmptyBucketOpen}
+                  onClose={() => setIsEmptyBucketOpen(false)}
+                  onSubmit={handleEmptyBucket}
+                  place={selectedPlace}
+              />
+
+              <RemoveBucketModal
+                  isOpen={isRemoveBucketOpen}
+                  onClose={() => setIsRemoveBucketOpen(false)}
+                  onSubmit={handleRemoveBucket}
+                  place={selectedPlace}
+              />
+
+              <InvalidModal
+                  isOpen={isInvalidOpen}
+                  onClose={() => setIsInvalidOpen(false)}
+                  onSubmit={handleInvalid}
+                  place={selectedPlace}
+              />
+            </>
+        )}
+      </DashboardLayout>
   )
 }

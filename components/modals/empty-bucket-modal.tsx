@@ -39,9 +39,9 @@ export function EmptyBucketModal({ isOpen, onClose, onSubmit, place }: EmptyBuck
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Опорожнить ковш</DialogTitle>
+          <DialogTitle>Опустошить ковш</DialogTitle>
           <DialogDescription>
-            Опорожнение ковша на месте Ряд {place.row} место {place.number} ({place.row * 100 + place.number})
+            Опустошение ковша на месте Ряд {place.row} место {place.number} ({place.row * 100 + place.number})
           </DialogDescription>
         </DialogHeader>
 
@@ -66,7 +66,7 @@ export function EmptyBucketModal({ isOpen, onClose, onSubmit, place }: EmptyBuck
             <Button type="button" variant="outline" onClick={onClose}>
               Отмена
             </Button>
-            <Button type="submit">Опорожнить</Button>
+            <Button type="submit">Опустошить</Button>
           </DialogFooter>
         </form>
       </DialogContent>

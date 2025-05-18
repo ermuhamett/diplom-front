@@ -25,7 +25,7 @@ export function RemoveBucketModal({ isOpen, onClose, onSubmit, place }: RemoveBu
         <DialogHeader>
           <DialogTitle>Убрать ковш</DialogTitle>
           <DialogDescription>
-            Вы уверены, что хотите убрать ковш с места Ряд {place.row} место {place.number} (
+            Вы действительно хотите убрать ковш с места Ряд {place.row} место {place.number} (
             {place.row * 100 + place.number})?
           </DialogDescription>
         </DialogHeader>

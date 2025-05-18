@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid"
 import type { SlagFieldPlace, Bucket, Material, MaterialSetting, SlagFieldState } from "@/lib/types"
 
 // Определим тип для записи истории
@@ -42,205 +43,737 @@ const STORAGE_KEYS = {
   USER_HISTORY: "user_action_history", // Ключ для истории
 }
 
-// Обновляем начальные данные, меняя формат поля row с "Ряд X" на числовой формат
-const INITIAL_DATA = {
-  places: [
-    { id: "1", row: 1, number: 1, isEnable: true },
-    { id: "2", row: 1, number: 2, isEnable: true },
-    { id: "3", row: 1, number: 3, isEnable: true },
-    { id: "4", row: 1, number: 4, isEnable: false },
-    { id: "5", row: 1, number: 5, isEnable: true },
-
-    { id: "21", row: 2, number: 1, isEnable: true },
-    { id: "22", row: 2, number: 2, isEnable: false },
-    { id: "23", row: 2, number: 3, isEnable: true },
-    { id: "24", row: 2, number: 4, isEnable: true },
-    { id: "25", row: 2, number: 5, isEnable: true },
-  ],
-  buckets: [
-    { id: "b1", name: "Ковш 114", isDelete: false },
-    { id: "b2", name: "Ковш 115", isDelete: false },
-    { id: "b3", name: "Ковш 116", isDelete: false },
-    { id: "b4", name: "Ковш 117", isDelete: false },
-  ],
-  materials: [
-    { id: "m1", name: "Шлак стальной", isDelete: false },
-    { id: "m2", name: "Шлак доменный", isDelete: false },
-    { id: "m3", name: "Шлак мартеновский", isDelete: false },
-  ],
-  materialSettings: [
-    {
-      id: "s1",
-      materialId: "m1",
-      duration: 2880, // 48 часов в минутах
-      visualStateCode: "Красный",
-      minHours: 0,
-      maxHours: 12,
-    },
-    {
-      id: "s2",
-      materialId: "m1",
-      duration: 2880, // 48 часов в минутах
-      visualStateCode: "Желтый",
-      minHours: 12,
-      maxHours: 24,
-    },
-    {
-      id: "s3",
-      materialId: "m1",
-      duration: 2880, // 48 часов в минутах
-      visualStateCode: "Синий",
-      minHours: 24,
-      maxHours: 36,
-    },
-    {
-      id: "s4",
-      materialId: "m1",
-      duration: 2880, // 48 часов в минутах
-      visualStateCode: "Зеленый",
-      minHours: 36,
-      maxHours: 48,
-    },
-    {
-      id: "s5",
-      materialId: "m2",
-      duration: 2160, // 36 часов в минутах
-      visualStateCode: "Синий",
-      minHours: 0,
-      maxHours: 12,
-    },
-    {
-      id: "s6",
-      materialId: "m2",
-      duration: 2160, // 36 часов в минутах
-      visualStateCode: "Желтый",
-      minHours: 12,
-      maxHours: 24,
-    },
-    {
-      id: "s7",
-      materialId: "m2",
-      duration: 2160, // 36 часов в минутах
-      visualStateCode: "Зеленый",
-      minHours: 24,
-      maxHours: 36,
-    },
-  ],
-  slagFieldStates: [
-    {
-      id: "1",
-      placeId: "1", // Ряд 1, номер 1
-      state: "BucketPlaced",
-      bucketId: "b1",
-      materialId: "m1",
-      startDate: new Date(Date.now() - 3600000 * 6).toISOString(), // 6 часов назад (Красный)
-      endDate: null,
-      weight: 5250,
-    },
-    {
-      id: "2",
-      placeId: "3", // Ряд 1, номер 3
-      state: "BucketPlaced",
-      bucketId: "b2",
-      materialId: "m1",
-      startDate: new Date(Date.now() - 3600000 * 18).toISOString(), // 18 часов назад (Желтый)
-      endDate: null,
-      weight: 4800,
-    },
-    {
-      id: "3",
-      placeId: "5", // Ряд 1, номер 5
-      state: "BucketPlaced",
-      bucketId: "b3",
-      materialId: "m1",
-      startDate: new Date(Date.now() - 3600000 * 30).toISOString(), // 30 часов назад (Синий)
-      endDate: null,
-      weight: 5100,
-    },
-    {
-      id: "4",
-      placeId: "21", // Ряд 2, номер 1
-      state: "BucketPlaced",
-      bucketId: "b4",
-      materialId: "m1",
-      startDate: new Date(Date.now() - 3600000 * 49).toISOString(), // 42 часа назад (Зеленый)
-      endDate: null,
-      weight: 4950,
-    },
-  ],
-}
-
-// В класс DataStore добавим новое приватное поле для истории
+// Класс для хранения данных
 class DataStore {
   private places: SlagFieldPlace[] = []
   private buckets: Bucket[] = []
   private materials: Material[] = []
-  private materialSettings: MaterialSetting[] = []
   private slagFieldStates: SlagFieldState[] = []
+  private materialSettings: MaterialSetting[] = []
   private userHistory: HistoryRecord[] = [] // Новое поле для истории
-  private static instance: DataStore | null = null
 
-  // Приватный конструктор для паттерна Singleton
-  private constructor() {
-    this.loadFromStorage()
+  constructor() {
+    // Инициализация данных
+    //this.initializePlaces()
+    //this.initializeBuckets()
+    this.initializeMaterials()
+    this.initializeMaterialSettings()
   }
 
-  // Метод для получения экземпляра класса
-  public static getInstance(): DataStore {
-    if (!DataStore.instance) {
-      DataStore.instance = new DataStore()
+  // Методы для синхронизации с API
+  syncPlacesWithApi(places: SlagFieldPlace[]): void {
+    // Обновляем локальное хранилище данными с API
+    this.places = places
+    // Сохраняем в localStorage
+    this.saveToStorage()
+  }
+
+  syncBucketsWithApi(buckets: Bucket[]): void {
+    // Обновляем локальное хранилище данными с API
+    this.buckets = buckets
+    // Сохраняем в localStorage
+    this.saveToStorage()
+  }
+
+  // Метод для добавления места с уже существующим ID (из API)
+  addPlaceWithId(place: SlagFieldPlace): SlagFieldPlace {
+    this.places.push(place)
+    // Сохраняем в localStorage
+    this.saveToStorage()
+    return place
+  }
+
+  // Метод для добавления ковша с уже существующим ID (из API)
+  addBucketWithId(bucket: Bucket): Bucket {
+    this.buckets.push(bucket)
+    // Сохраняем в localStorage
+    this.saveToStorage()
+    return bucket
+  }
+
+  // Методы для работы с местами
+  getPlaces(): SlagFieldPlace[] {
+    return this.places
+  }
+
+  getPlace(id: string): SlagFieldPlace | undefined {
+    return this.places.find((place) => place.id === id)
+  }
+
+  addPlace(place: Omit<SlagFieldPlace, "id">): SlagFieldPlace {
+    const newPlace: SlagFieldPlace = {
+      id: uuidv4(),
+      ...place,
     }
-    return DataStore.instance
+    this.places.push(newPlace)
+
+    // Добавляем запись в историю
+    this.addToHistory(
+        "add",
+        "place",
+        newPlace.id,
+        `Добавлено место: ${place.name || `${place.row || 0}-${place.number || 0}`}`,
+    )
+
+    // Сохраняем в localStorage
+    this.saveToStorage()
+    return newPlace
   }
 
-  // В метод loadFromStorage добавим загрузку истории
+  updatePlace(id: string, place: Partial<SlagFieldPlace>): SlagFieldPlace | undefined {
+    const index = this.places.findIndex((p) => p.id === id)
+    if (index !== -1) {
+      this.places[index] = { ...this.places[index], ...place }
+
+      // Добавляем запись в историю
+      this.addToHistory(
+          "update",
+          "place",
+          id,
+          `Обновлено место: ${place.name || `${place.row || 0}-${place.number || 0}`}`,
+      )
+
+      // Сохраняем в localStorage
+      this.saveToStorage()
+      return this.places[index]
+    }
+    return undefined
+  }
+
+  deletePlace(id: string): boolean {
+    const initialLength = this.places.length
+    const placeToDelete = this.getPlace(id)
+    this.places = this.places.filter((place) => place.id !== id)
+    const deleted = this.places.length !== initialLength
+
+    if (deleted && placeToDelete) {
+      // Добавляем запись в историю
+      this.addToHistory(
+          "delete",
+          "place",
+          id,
+          `Удалено место: ${placeToDelete.name || `${placeToDelete.row || 0}-${placeToDelete.number || 0}`}`,
+      )
+
+      // Сохраняем в localStorage
+      this.saveToStorage()
+    }
+
+    return deleted
+  }
+
+  // Методы для работы с ковшами
+  getBuckets(): Bucket[] {
+    return this.buckets
+  }
+
+  getBucket(id: string): Bucket | undefined {
+    return this.buckets.find((bucket) => bucket.id === id)
+  }
+
+  addBucket(bucket: Omit<Bucket, "id">): Bucket {
+    const newBucket: Bucket = {
+      id: uuidv4(),
+      ...bucket,
+    }
+    this.buckets.push(newBucket)
+
+    // Добавляем запись в историю
+    this.addToHistory("add", "bucket", newBucket.id, `Добавлен ковш: ${bucket.name}`)
+
+    // Сохраняем в localStorage
+    this.saveToStorage()
+    return newBucket
+  }
+
+  updateBucket(id: string, bucket: Partial<Bucket>): Bucket | undefined {
+    const index = this.buckets.findIndex((b) => b.id === id)
+    if (index !== -1) {
+      this.buckets[index] = { ...this.buckets[index], ...bucket }
+
+      // Добавляем запись в историю
+      this.addToHistory("update", "bucket", id, `Обновлен ковш: ${bucket.name || this.buckets[index].name}`)
+
+      // Сохраняем в localStorage
+      this.saveToStorage()
+      return this.buckets[index]
+    }
+    return undefined
+  }
+
+  deleteBucket(id: string): boolean {
+    const initialLength = this.buckets.length
+    const bucketToDelete = this.getBucket(id)
+    this.buckets = this.buckets.filter((bucket) => bucket.id !== id)
+    const deleted = this.buckets.length !== initialLength
+
+    if (deleted && bucketToDelete) {
+      // Добавляем запись в историю
+      this.addToHistory("delete", "bucket", id, `Удален ковш: ${bucketToDelete.name}`)
+
+      // Сохраняем в localStorage
+      this.saveToStorage()
+    }
+
+    return deleted
+  }
+
+  // Методы для работы с материалами
+  getMaterials(): Material[] {
+    return this.materials
+  }
+
+  getMaterial(id: string): Material | undefined {
+    return this.materials.find((material) => material.id === id)
+  }
+
+  addMaterial(material: Omit<Material, "id">): Material {
+    const newMaterial: Material = {
+      id: uuidv4(),
+      ...material,
+    }
+    this.materials.push(newMaterial)
+
+    // Добавляем запись в историю
+    this.addToHistory("add", "material", newMaterial.id, `Добавлен материал: ${material.name}`)
+
+    // Сохраняем в localStorage
+    this.saveToStorage()
+    return newMaterial
+  }
+
+  updateMaterial(id: string, material: Partial<Material>): Material | undefined {
+    const index = this.materials.findIndex((m) => m.id === id)
+    if (index !== -1) {
+      this.materials[index] = { ...this.materials[index], ...material }
+
+      // Добавляем запись в историю
+      this.addToHistory("update", "material", id, `Обновлен материал: ${material.name || this.materials[index].name}`)
+
+      // Сохраняем в localStorage
+      this.saveToStorage()
+      return this.materials[index]
+    }
+    return undefined
+  }
+
+  deleteMaterial(id: string): boolean {
+    const initialLength = this.materials.length
+    const materialToDelete = this.getMaterial(id)
+    this.materials = this.materials.filter((material) => material.id !== id)
+    const deleted = this.materials.length !== initialLength
+
+    if (deleted && materialToDelete) {
+      // Добавляем запись в историю
+      this.addToHistory("delete", "material", id, `Удален материал: ${materialToDelete.name}`)
+
+      // Сохраняем в localStorage
+      this.saveToStorage()
+    }
+
+    return deleted
+  }
+
+  // Методы для работы с шлаковым полем
+  getSlagFieldStates(): SlagFieldState[] {
+    return this.slagFieldStates
+  }
+
+  getEnrichedSlagFieldStates() {
+    return this.slagFieldStates.map((state) => {
+      const place = this.getPlace(state.placeId)
+      const bucket = state.bucketId ? this.getBucket(state.bucketId) : undefined
+      const material = state.materialId ? this.getMaterial(state.materialId) : undefined
+
+      return {
+        ...state,
+        place,
+        bucket,
+        material,
+      }
+    })
+  }
+
+  placeBucket(data: {
+    placeId: string
+    bucketId: string
+    materialId: string
+    startDate: Date
+    weight: number
+  }): SlagFieldState {
+    const { placeId, bucketId, materialId, startDate, weight } = data
+
+    // Проверяем, что место существует
+    const place = this.getPlace(placeId)
+    if (!place) {
+      throw new Error("Место не найдено")
+    }
+
+    // Проверяем, что ковш существует
+    const bucket = this.getBucket(bucketId)
+    if (!bucket) {
+      throw new Error("Ковш не найден")
+    }
+
+    // Проверяем, что материал существует
+    const material = this.getMaterial(materialId)
+    if (!material) {
+      throw new Error("Материал не найден")
+    }
+
+    // Создаем новое состояние
+    const newState: SlagFieldState = {
+      id: uuidv4(),
+      placeId,
+      bucketId,
+      materialId,
+      startDate,
+      weight,
+      status: "active",
+    }
+
+    // Добавляем состояние
+    this.slagFieldStates.push(newState)
+
+    // Добавляем запись в историю
+    this.addToHistory(
+        "placeBucket",
+        "slagField",
+        newState.id,
+        `Ковш ${bucket.name} размещен на месте ${place.name || `${place.row || 0}-${place.number || 0}`}`,
+    )
+
+    // Сохраняем в localStorage
+    this.saveToStorage()
+    return newState
+  }
+
+  emptyBucket(data: { placeId: string; endDate: Date }): SlagFieldState | undefined {
+    const { placeId, endDate } = data
+
+    // Ищем активное состояние (endDate === null)
+    const stateIndex = this.slagFieldStates.findIndex(
+        (state) => state.placeId === placeId && state.endDate === null
+    )
+
+    if (stateIndex === -1) {
+      throw new Error("Активное состояние не найдено")
+    }
+
+    // Обновляем состояние
+    const updatedState = {
+      ...this.slagFieldStates[stateIndex],
+      endDate,
+      state: "BucketEmptied", // Устанавливаем новое состояние
+    }
+
+    this.slagFieldStates[stateIndex] = updatedState
+
+    // Запись в историю
+    const place = this.getPlace(placeId)
+    const bucket = this.getBucket(updatedState.bucketId)
+    if (place && bucket) {
+      this.addToHistory(
+          "emptyBucket",
+          "slagField",
+          updatedState.id,
+          `Ковш ${bucket.name} опустошен на месте ${place.row}-${place.number}`
+      )
+    }
+
+    this.saveToStorage()
+    return updatedState
+  }
+
+  removeBucket(placeId: string): boolean {
+    // Находим активное состояние для места
+    const stateIndex = this.slagFieldStates.findIndex((state) => state.placeId === placeId && state.status === "active")
+
+    if (stateIndex === -1) {
+      return false
+    }
+
+    // Удаляем состояние
+    const removedState = this.slagFieldStates.splice(stateIndex, 1)[0]
+
+    // Добавляем запись в историю
+    if (removedState) {
+      const place = this.getPlace(placeId)
+      const bucket = this.getBucket(removedState.bucketId)
+      const material = this.getMaterial(removedState.materialId)
+
+      if (place && bucket && material) {
+        this.addToHistory(
+            "removeBucket",
+            "slagField",
+            removedState.id,
+            `Ковш ${bucket.name} удален с места ${place.name || `${place.row || 0}-${place.number || 0}`}`,
+        )
+      }
+    }
+
+    // Сохраняем в localStorage
+    this.saveToStorage()
+    return true
+  }
+
+  invalidateState(data: { placeId: string; description: string }): boolean {
+    const { placeId, description } = data
+
+    // Находим активное состояние для места
+    const stateIndex = this.slagFieldStates.findIndex((state) => state.placeId === placeId && state.status === "active")
+
+    if (stateIndex === -1) {
+      return false
+    }
+
+    // Обновляем состояние
+    const updatedState = {
+      ...this.slagFieldStates[stateIndex],
+      status: "invalid",
+      description,
+    }
+
+    this.slagFieldStates[stateIndex] = updatedState
+
+    // Добавляем запись в историю
+    const place = this.getPlace(placeId)
+    const bucket = this.getBucket(updatedState.bucketId)
+    const material = this.getMaterial(updatedState.materialId)
+
+    if (place && bucket && material) {
+      this.addToHistory(
+          "invalidateState",
+          "slagField",
+          updatedState.id,
+          `Состояние на месте ${place.name || `${place.row || 0}-${place.number || 0}`} объявлено недействительным`,
+      )
+    }
+
+    // Сохраняем в localStorage
+    this.saveToStorage()
+    return true
+  }
+
+  // Методы для работы с настройками материалов
+  getMaterialSettings(): MaterialSetting[] {
+    return this.materialSettings
+  }
+
+  getMaterialSetting(id: string): MaterialSetting | undefined {
+    return this.materialSettings.find((setting) => setting.id === id)
+  }
+
+  addMaterialSetting(setting: Omit<MaterialSetting, "id">): MaterialSetting {
+    const newSetting: MaterialSetting = {
+      id: uuidv4(),
+      ...setting,
+    }
+    this.materialSettings.push(newSetting)
+
+    // Добавляем запись в историю
+    this.addToHistory("add", "materialSetting", newSetting.id, `Добавлена настройка: ${setting.name}`)
+
+    // Сохраняем в localStorage
+    this.saveToStorage()
+    return newSetting
+  }
+
+  updateMaterialSetting(id: string, setting: Partial<MaterialSetting>): MaterialSetting | undefined {
+    const index = this.materialSettings.findIndex((s) => s.id === id)
+    if (index !== -1) {
+      this.materialSettings[index] = { ...this.materialSettings[index], ...setting }
+
+      // Добавляем запись в историю
+      this.addToHistory(
+          "update",
+          "materialSetting",
+          id,
+          `Обновлена настройка: ${setting.name || this.materialSettings[index].name}`,
+      )
+
+      // Сохраняем в localStorage
+      this.saveToStorage()
+      return this.materialSettings[index]
+    }
+    return undefined
+  }
+
+  deleteMaterialSetting(id: string): boolean {
+    const initialLength = this.materialSettings.length
+    const settingToDelete = this.getMaterialSetting(id)
+    this.materialSettings = this.materialSettings.filter((setting) => setting.id !== id)
+    const deleted = this.materialSettings.length !== initialLength
+
+    if (deleted && settingToDelete) {
+      // Добавляем запись в историю
+      this.addToHistory("delete", "materialSetting", id, `Удалена настройка: ${settingToDelete.name}`)
+
+      // Сохраняем в localStorage
+      this.saveToStorage()
+    }
+
+    return deleted
+  }
+
+  // Инициализация данных
+  /*private initializePlaces() {
+    this.places = [
+      {
+        id: "1",
+        row: 1,
+        number: 1,
+        name: "Место 101",
+        description: "Описание места 1",
+        coordinates: { x: 100, y: 100 },
+        status: "available",
+        isEnable: true,
+      },
+      {
+        id: "2",
+        row: 1,
+        number: 2,
+        name: "Место 102",
+        description: "Описание места 2",
+        coordinates: { x: 200, y: 100 },
+        status: "available",
+        isEnable: true,
+      },
+      {
+        id: "3",
+        row: 1,
+        number: 3,
+        name: "Место 103",
+        description: "Описание места 3",
+        coordinates: { x: 300, y: 100 },
+        status: "available",
+        isEnable: true,
+      },
+      {
+        id: "4",
+        row: 2,
+        number: 1,
+        name: "Место 201",
+        description: "Описание места 4",
+        coordinates: { x: 100, y: 200 },
+        status: "available",
+        isEnable: true,
+      },
+      {
+        id: "5",
+        row: 2,
+        number: 2,
+        name: "Место 202",
+        description: "Описание места 5",
+        coordinates: { x: 200, y: 200 },
+        status: "available",
+        isEnable: true,
+      },
+      {
+        id: "6",
+        row: 2,
+        number: 3,
+        name: "Место 203",
+        description: "Описание места 6",
+        coordinates: { x: 300, y: 200 },
+        status: "available",
+        isEnable: true,
+      },
+      {
+        id: "7",
+        row: 3,
+        number: 1,
+        name: "Место 301",
+        description: "Описание места 7",
+        coordinates: { x: 100, y: 300 },
+        status: "available",
+        isEnable: true,
+      },
+      {
+        id: "8",
+        row: 3,
+        number: 2,
+        name: "Место 302",
+        description: "Описание места 8",
+        coordinates: { x: 200, y: 300 },
+        status: "available",
+        isEnable: true,
+      },
+      {
+        id: "9",
+        row: 3,
+        number: 3,
+        name: "Место 303",
+        description: "Описание места 9",
+        coordinates: { x: 300, y: 300 },
+        status: "available",
+        isEnable: true,
+      },
+    ]
+  }
+
+  private initializeBuckets() {
+    this.buckets = [
+      {
+        id: "1",
+        name: "Ковш 1",
+        description: "Описание ковша 1",
+        capacity: 10,
+        status: "available",
+        isDelete: false,
+      },
+      {
+        id: "2",
+        name: "Ковш 2",
+        description: "Описание ковша 2",
+        capacity: 15,
+        status: "available",
+        isDelete: false,
+      },
+      {
+        id: "3",
+        name: "Ковш 3",
+        description: "Описание ковша 3",
+        capacity: 20,
+        status: "available",
+        isDelete: false,
+      },
+    ]
+  }*/
+
+  private initializeMaterials() {
+    this.materials = [
+      { id: "165b725b-352f-4453-a73e-f08089b333a8", name: "Шлак мартеновский", isDelete: false },
+      { id: "2267c5cd-b1a6-43d6-bbd7-317f2e172553", name: "Шлак стальной", isDelete: false },
+      { id: "a2c17001-1a28-4e00-8ce0-ffd31a4510b4", name: "Шлак доменный", isDelete: false },
+    ]
+  }
+
+  private initializeMaterialSettings() {
+    this.materialSettings = [
+      {
+        id: "s1",
+        materialId: "2267c5cd-b1a6-43d6-bbd7-317f2e172553", // Шлак стальной
+        duration: 2880, // 48 часов в минутах
+        visualStateCode: "Красный",
+        minHours: 0,
+        maxHours: 12,
+      },
+      {
+        id: "s2",
+        materialId: "2267c5cd-b1a6-43d6-bbd7-317f2e172553", // Шлак стальной
+        duration: 2880, // 48 часов в минутах
+        visualStateCode: "Желтый",
+        minHours: 12,
+        maxHours: 24,
+      },
+      {
+        id: "s3",
+        materialId: "2267c5cd-b1a6-43d6-bbd7-317f2e172553", // Шлак стальной
+        duration: 2880, // 48 часов в минутах
+        visualStateCode: "Синий",
+        minHours: 24,
+        maxHours: 36,
+      },
+      {
+        id: "s4",
+        materialId: "2267c5cd-b1a6-43d6-bbd7-317f2e172553", // Шлак стальной
+        duration: 2880, // 48 часов в минутах
+        visualStateCode: "Зеленый",
+        minHours: 36,
+        maxHours: 48,
+      },
+      {
+        id: "s5",
+        materialId: "a2c17001-1a28-4e00-8ce0-ffd31a4510b4", // Шлак доменный
+        duration: 2160, // 36 часов в минутах
+        visualStateCode: "Синий",
+        minHours: 0,
+        maxHours: 12,
+      },
+      {
+        id: "s6",
+        materialId: "a2c17001-1a28-4e00-8ce0-ffd31a4510b4", // Шлак доменный
+        duration: 2160, // 36 часов в минутах
+        visualStateCode: "Желтый",
+        minHours: 12,
+        maxHours: 24,
+      },
+      {
+        id: "s7",
+        materialId: "a2c17001-1a28-4e00-8ce0-ffd31a4510b4", // Шлак доменный
+        duration: 2160, // 36 часов в минутах
+        visualStateCode: "Зеленый",
+        minHours: 24,
+        maxHours: 36,
+      },
+      {
+        id: "s8",
+        materialId: "165b725b-352f-4453-a73e-f08089b333a8", // Шлак мартеновский
+        duration: 2160, // 36 часов в минутах
+        visualStateCode: "Красный",
+        minHours: 0,
+        maxHours: 12,
+      },
+      {
+        id: "s9",
+        materialId: "165b725b-352f-4453-a73e-f08089b333a8", // Шлак мартеновский
+        duration: 2160, // 36 часов в минутах
+        visualStateCode: "Желтый",
+        minHours: 12,
+        maxHours: 24,
+      },
+      {
+        id: "s10",
+        materialId: "165b725b-352f-4453-a73e-f08089b333a8", // Шлак мартеновский
+        duration: 2160, // 36 часов в минутах
+        visualStateCode: "Зеленый",
+        minHours: 24,
+        maxHours: 36,
+      },
+    ]
+  }
+
+  // Метод для загрузки данных из localStorage
   private loadFromStorage(): void {
     if (typeof window === "undefined") return
 
     try {
       // Загрузка мест
       const placesJson = localStorage.getItem(STORAGE_KEYS.PLACES)
-      this.places = placesJson ? JSON.parse(placesJson) : INITIAL_DATA.places
+      if (placesJson) {
+        this.places = JSON.parse(placesJson)
+      }
 
       // Загрузка ковшей
       const bucketsJson = localStorage.getItem(STORAGE_KEYS.BUCKETS)
-      this.buckets = bucketsJson ? JSON.parse(bucketsJson) : INITIAL_DATA.buckets
+      if (bucketsJson) {
+        this.buckets = JSON.parse(bucketsJson)
+      }
 
       // Загрузка материалов
       const materialsJson = localStorage.getItem(STORAGE_KEYS.MATERIALS)
-      this.materials = materialsJson ? JSON.parse(materialsJson) : INITIAL_DATA.materials
+      if (materialsJson) {
+        this.materials = JSON.parse(materialsJson)
+      }
 
       // Загрузка настроек материалов
       const materialSettingsJson = localStorage.getItem(STORAGE_KEYS.MATERIAL_SETTINGS)
-      this.materialSettings = materialSettingsJson ? JSON.parse(materialSettingsJson) : INITIAL_DATA.materialSettings
+      if (materialSettingsJson) {
+        this.materialSettings = JSON.parse(materialSettingsJson)
+      }
 
       // Загрузка состояний шлакового поля
       const statesJson = localStorage.getItem(STORAGE_KEYS.SLAG_FIELD_STATES)
-      const parsedStates = statesJson ? JSON.parse(statesJson) : INITIAL_DATA.slagFieldStates
-
-      // Преобразование строковых дат в объекты Date
-      this.slagFieldStates = parsedStates.map((state: any) => ({
-        ...state,
-        startDate: state.startDate ? new Date(state.startDate) : null,
-        endDate: state.endDate ? new Date(state.endDate) : null,
-      }))
+      if (statesJson) {
+        this.slagFieldStates = JSON.parse(statesJson)
+      }
 
       // Загрузка истории действий пользователя
       const historyJson = localStorage.getItem(STORAGE_KEYS.USER_HISTORY)
-      const parsedHistory = historyJson ? JSON.parse(historyJson) : []
-
-      // Преобразование строковых дат в объекты Date
-      this.userHistory = parsedHistory.map((record: any) => {
-        // Преобразуем все поля с датами в объекты Date
-        const processedRecord = { ...record }
-
-        if (record.timestamp) processedRecord.timestamp = new Date(record.timestamp)
-        if (record.operationTime) processedRecord.operationTime = new Date(record.operationTime)
-        if (record.placementTime) processedRecord.placementTime = new Date(record.placementTime)
-        if (record.emptyTime) processedRecord.emptyTime = new Date(record.emptyTime)
-
-        return processedRecord
-      })
+      if (historyJson) {
+        this.userHistory = JSON.parse(historyJson)
+      }
     } catch (error) {
       console.error("Ошибка при загрузке данных из localStorage:", error)
       // В случае ошибки используем начальные данные
@@ -248,7 +781,7 @@ class DataStore {
     }
   }
 
-  // В метод saveToStorage добавим сохранение истории
+  // Метод для сохранения данных в localStorage
   private saveToStorage(): void {
     if (typeof window === "undefined") return
 
@@ -275,15 +808,10 @@ class DataStore {
     }
   }
 
-  // Генерация уникального ID
-  private generateId(): string {
-    return Math.random().toString(36).substring(2, 9)
-  }
-
   // Методы для работы с историей
-  public addToHistory(action: string, entityType: string, entityId?: string, details?: string): HistoryRecord {
+  private addToHistory(action: string, entityType: string, entityId?: string, details?: string): HistoryRecord {
     const historyRecord: HistoryRecord = {
-      id: this.generateId(),
+      id: uuidv4(),
       action,
       entityType,
       entityId,
@@ -292,541 +820,28 @@ class DataStore {
       operationTime: new Date(),
     }
 
-    // Если это операция изменения состояния места, добавим дополнительные данные
-    if ((action === "enablePlace" || action === "disablePlace") && entityType === "place" && entityId) {
-      const place = this.getPlace(entityId)
-      if (place) {
-        historyRecord.placeId = place.id
-        historyRecord.placeRow = place.row
-        historyRecord.placeNumber = place.number
-      }
-    }
-
     this.userHistory.push(historyRecord)
     this.saveToStorage()
     return historyRecord
   }
 
-  // Добавим метод для получения истории
   public getUserHistory(): HistoryRecord[] {
     return [...this.userHistory]
   }
 
-  // В метод resetToInitialData добавим сброс истории
+  // Метод для сброса данных к начальным
   public resetToInitialData(): void {
-    this.places = [...INITIAL_DATA.places]
-    this.buckets = [...INITIAL_DATA.buckets]
-    this.materials = [...INITIAL_DATA.materials]
-    this.materialSettings = [...INITIAL_DATA.materialSettings]
-    this.slagFieldStates = INITIAL_DATA.slagFieldStates.map((state) => ({
-      ...state,
-      startDate: state.startDate ? new Date(state.startDate) : null,
-      endDate: state.endDate ? new Date(state.endDate) : null,
-    }))
+    //this.initializePlaces()
+    //this.initializeBuckets()
+    this.initializeMaterials()
+    this.initializeMaterialSettings()
     this.userHistory = []
     this.saveToStorage()
   }
-
-  // CRUD операции для мест
-  public getPlaces(): SlagFieldPlace[] {
-    return [...this.places]
-  }
-
-  public getPlace(id: string): SlagFieldPlace | undefined {
-    return this.places.find((place) => place.id === id)
-  }
-
-  // Модифицируем методы CRUD для записи в историю
-  // Например, для addPlace:
-  public addPlace(place: Omit<SlagFieldPlace, "id">): SlagFieldPlace {
-    const newPlace: SlagFieldPlace = {
-      ...place,
-      id: this.generateId(),
-    }
-    this.places.push(newPlace)
-
-    // Добавляем запись в историю
-    this.addToHistory("add", "place", newPlace.id, `Добавлено место: Ряд ${place.row}, Номер ${place.number}`)
-
-    this.saveToStorage()
-    return newPlace
-  }
-
-  // Аналогично модифицируем updatePlace
-  public updatePlace(id: string, place: Partial<SlagFieldPlace>): SlagFieldPlace | null {
-    const index = this.places.findIndex((p) => p.id === id)
-    if (index === -1) return null
-
-    const oldPlace = this.places[index]
-    const updatedPlace = { ...oldPlace, ...place }
-    this.places[index] = updatedPlace
-
-    // Не добавляем запись в историю здесь, так как это будет делаться явно в handleWentInUse и handleOutOfUse
-    // Добавляем запись только если это не изменение isEnable
-    if (place.isEnable === undefined) {
-      this.addToHistory("update", "place", id, `Обновлено место: Ряд ${updatedPlace.row}, Номер ${updatedPlace.number}`)
-    }
-
-    this.saveToStorage()
-    return updatedPlace
-  }
-
-  // И для deletePlace
-  public deletePlace(id: string): boolean {
-    const place = this.getPlace(id)
-    if (!place) return false
-
-    const initialLength = this.places.length
-    this.places = this.places.filter((place) => place.id !== id)
-    const deleted = initialLength > this.places.length
-
-    if (deleted) {
-      // Добавляем запись в историю
-      this.addToHistory("delete", "place", id, `Удалено место: Ряд ${place.row}, Номер ${place.number}`)
-
-      this.saveToStorage()
-    }
-
-    return deleted
-  }
-
-  // CRUD операции для ковшей
-  public getBuckets(): Bucket[] {
-    return this.buckets.filter((bucket) => !bucket.isDelete)
-  }
-
-  public getAllBuckets(): Bucket[] {
-    return [...this.buckets]
-  }
-
-  public getBucket(id: string): Bucket | undefined {
-    return this.buckets.find((bucket) => bucket.id === id)
-  }
-
-  // Аналогично для операций с ковшами
-  public addBucket(bucket: Omit<Bucket, "id">): Bucket {
-    const newBucket: Bucket = {
-      ...bucket,
-      id: this.generateId(),
-    }
-    this.buckets.push(newBucket)
-
-    // Добавляем запись в историю
-    this.addToHistory("add", "bucket", newBucket.id, `Добавлен ковш: ${bucket.name}`)
-
-    this.saveToStorage()
-    return newBucket
-  }
-
-  public updateBucket(id: string, bucket: Partial<Bucket>): Bucket | null {
-    const index = this.buckets.findIndex((b) => b.id === id)
-    if (index === -1) return null
-
-    const oldBucket = this.buckets[index]
-    const updatedBucket = { ...oldBucket, ...bucket }
-    this.buckets[index] = updatedBucket
-
-    // Добавляем запись в историю
-    this.addToHistory("update", "bucket", id, `Обновлен ковш: ${updatedBucket.name}`)
-
-    this.saveToStorage()
-    return updatedBucket
-  }
-
-  public deleteBucket(id: string): boolean {
-    const bucket = this.buckets.find((b) => b.id === id)
-    if (!bucket) return false
-
-    bucket.isDelete = true
-
-    // Добавляем запись в историю
-    this.addToHistory("delete", "bucket", id, `Удален ковш: ${bucket.name}`)
-
-    this.saveToStorage()
-    return true
-  }
-
-  // CRUD операции для материалов
-  public getMaterials(): Material[] {
-    return this.materials.filter((material) => !material.isDelete)
-  }
-
-  public getAllMaterials(): Material[] {
-    return [...this.materials]
-  }
-
-  public getMaterial(id: string): Material | undefined {
-    return this.materials.find((material) => material.id === id)
-  }
-
-  // И для операций с материалами
-  public addMaterial(material: Omit<Material, "id">): Material {
-    const newMaterial: Material = {
-      ...material,
-      id: this.generateId(),
-    }
-    this.materials.push(newMaterial)
-
-    // Добавляем запись в историю
-    this.addToHistory("add", "material", newMaterial.id, `Добавлен материал: ${material.name}`)
-
-    this.saveToStorage()
-    return newMaterial
-  }
-
-  public updateMaterial(id: string, material: Partial<Material>): Material | null {
-    const index = this.materials.findIndex((m) => m.id === id)
-    if (index === -1) return null
-
-    const oldMaterial = this.materials[index]
-    const updatedMaterial = { ...oldMaterial, ...material }
-    this.materials[index] = updatedMaterial
-
-    // Добавляем запись в историю
-    this.addToHistory("update", "material", id, `Обновлен материал: ${updatedMaterial.name}`)
-
-    this.saveToStorage()
-    return updatedMaterial
-  }
-
-  public deleteMaterial(id: string): boolean {
-    const material = this.materials.find((m) => m.id === id)
-    if (!material) return false
-
-    material.isDelete = true
-
-    // Добавляем запись в историю
-    this.addToHistory("delete", "material", id, `Удален материал: ${material.name}`)
-
-    this.saveToStorage()
-    return true
-  }
-
-  // CRUD операции для настроек материалов
-  public getMaterialSettings(): MaterialSetting[] {
-    return [...this.materialSettings]
-  }
-
-  public getMaterialSetting(id: string): MaterialSetting | undefined {
-    return this.materialSettings.find((setting) => setting.id === id)
-  }
-
-  public getMaterialSettingByMaterialId(materialId: string): MaterialSetting | undefined {
-    return this.materialSettings.find((setting) => setting.materialId === materialId)
-  }
-
-  // Добавляем недостающие методы для настроек материалов
-  public addMaterialSetting(setting: Omit<MaterialSetting, "id">): MaterialSetting {
-    const newSetting: MaterialSetting = {
-      ...setting,
-      id: this.generateId(),
-    }
-    this.materialSettings.push(newSetting)
-
-    // Получаем информацию о материале для записи в историю
-    const material = this.getMaterial(setting.materialId)
-
-    // Добавляем запись в историю
-    this.addToHistory(
-      "add",
-      "materialSetting",
-      newSetting.id,
-      `Добавлена настройка для материала: ${material?.name || setting.materialId}`,
-    )
-
-    this.saveToStorage()
-    return newSetting
-  }
-
-  public updateMaterialSetting(id: string, setting: Partial<MaterialSetting>): MaterialSetting | null {
-    const index = this.materialSettings.findIndex((s) => s.id === id)
-    if (index === -1) return null
-
-    const oldSetting = this.materialSettings[index]
-    const updatedSetting = { ...oldSetting, ...setting }
-    this.materialSettings[index] = updatedSetting
-
-    // Получаем информацию о материале для записи в историю
-    const material = this.getMaterial(updatedSetting.materialId)
-
-    // Добавляем запись в историю
-    this.addToHistory(
-      "update",
-      "materialSetting",
-      id,
-      `Обновлена настройка для материала: ${material?.name || updatedSetting.materialId}`,
-    )
-
-    this.saveToStorage()
-    return updatedSetting
-  }
-
-  public deleteMaterialSetting(id: string): boolean {
-    const setting = this.materialSettings.find((s) => s.id === id)
-    if (!setting) return false
-
-    // Получаем информацию о материале для записи в историю
-    const material = this.getMaterial(setting.materialId)
-
-    const initialLength = this.materialSettings.length
-    this.materialSettings = this.materialSettings.filter((setting) => setting.id !== id)
-    const deleted = initialLength > this.materialSettings.length
-
-    if (deleted) {
-      // Добавляем запись в историю
-      this.addToHistory(
-        "delete",
-        "materialSetting",
-        id,
-        `Удалена настройка для материала: ${material?.name || setting.materialId}`,
-      )
-
-      this.saveToStorage()
-    }
-    return deleted
-  }
-
-  // CRUD операции для состояний шлакового поля
-  public getSlagFieldStates(): SlagFieldState[] {
-    return [...this.slagFieldStates]
-  }
-
-  public getActiveSlagFieldStates(): SlagFieldState[] {
-    return this.slagFieldStates.filter((state) => state.endDate === null)
-  }
-
-  public getSlagFieldState(id: string): SlagFieldState | undefined {
-    return this.slagFieldStates.find((state) => state.id === id)
-  }
-
-  public getSlagFieldStateByPlaceId(placeId: string): SlagFieldState | undefined {
-    return this.slagFieldStates.find((state) => state.placeId === placeId && state.endDate === null)
-  }
-
-  public addSlagFieldState(state: Omit<SlagFieldState, "id">): SlagFieldState {
-    const newState: SlagFieldState = {
-      ...state,
-      id: this.generateId(),
-    }
-    this.slagFieldStates.push(newState)
-    this.saveToStorage()
-    return newState
-  }
-
-  public updateSlagFieldState(id: string, state: Partial<SlagFieldState>): SlagFieldState | null {
-    const index = this.slagFieldStates.findIndex((s) => s.id === id)
-    if (index === -1) return null
-
-    const updatedState = { ...this.slagFieldStates[index], ...state }
-    this.slagFieldStates[index] = updatedState
-    this.saveToStorage()
-    return updatedState
-  }
-
-  public deleteSlagFieldState(id: string): boolean {
-    const initialLength = this.slagFieldStates.length
-    this.slagFieldStates = this.slagFieldStates.filter((state) => state.id !== id)
-    const deleted = initialLength > this.slagFieldStates.length
-    if (deleted) {
-      this.saveToStorage()
-    }
-    return deleted
-  }
-
-  // Для операций с шлаковым полем
-  public placeBucket(data: {
-    placeId: string
-    bucketId: string
-    materialId: string
-    startDate: Date
-    weight: number
-  }): SlagFieldState | null {
-    // Проверяем, что место существует и доступно
-    const place = this.getPlace(data.placeId)
-    if (!place || !place.isEnable) return null
-
-    // Проверяем, что на месте нет активного ковша
-    const existingState = this.getSlagFieldStateByPlaceId(data.placeId)
-    if (existingState) return null
-
-    // Создаем новое состояние
-    const newState = this.addSlagFieldState({
-      placeId: data.placeId,
-      state: "BucketPlaced",
-      bucketId: data.bucketId,
-      materialId: data.materialId,
-      startDate: data.startDate,
-      endDate: null,
-      weight: data.weight,
-    })
-
-    // Получаем информацию о ковше и материале для записи в историю
-    const bucket = this.getBucket(data.bucketId)
-    const material = this.getMaterial(data.materialId)
-
-    // Добавляем только одну детальную запись в историю
-    const historyRecord: HistoryRecord = {
-      id: this.generateId(),
-      timestamp: new Date(),
-      action: "placeBucket",
-      entityType: "slagField",
-      placeId: data.placeId,
-      placeRow: place.row,
-      placeNumber: place.number,
-      bucketId: data.bucketId,
-      bucketName: bucket?.name || "Неизвестный ковш",
-      materialId: data.materialId,
-      materialName: material?.name || "Неизвестный материал",
-      weight: data.weight,
-      operationTime: new Date(),
-      placementTime: data.startDate,
-    }
-
-    this.userHistory.push(historyRecord)
-    this.saveToStorage()
-
-    return newState
-  }
-
-  // Обновляем метод emptyBucket, чтобы сохранять вес в истории
-  public emptyBucket(data: { placeId: string; endDate: Date }): SlagFieldState | null {
-    // Находим активное состояние для места
-    const state = this.getSlagFieldStateByPlaceId(data.placeId)
-    if (!state || state.state !== "BucketPlaced") return null
-
-    // Обновляем состояние
-    const updatedState = this.updateSlagFieldState(state.id, {
-      state: "BucketEmptied",
-      endDate: data.endDate,
-    })
-
-    // Получаем информацию о месте и ковше для записи в историю
-    const place = this.getPlace(data.placeId)
-    const bucket = this.getBucket(state.bucketId)
-    const material = this.getMaterial(state.materialId)
-
-    if (place && updatedState) {
-      // Добавляем запись в историю в структурированном виде
-      const historyRecord: HistoryRecord = {
-        id: this.generateId(),
-        timestamp: new Date(),
-        action: "emptyBucket",
-        entityType: "slagField",
-        placeId: data.placeId,
-        placeRow: place.row,
-        placeNumber: place.number,
-        bucketId: state.bucketId,
-        bucketName: bucket?.name || "Неизвестный ковш",
-        materialId: state.materialId,
-        materialName: material?.name || "Неизвестный материал",
-        weight: state.weight, // Сохраняем вес из состояния
-        operationTime: new Date(),
-        emptyTime: data.endDate,
-        placementTime: state.startDate,
-      }
-
-      this.userHistory.push(historyRecord)
-      this.saveToStorage()
-    }
-
-    return updatedState
-  }
-
-  // Обновляем метод removeBucket, чтобы сохранять вес в истории
-  public removeBucket(placeId: string): boolean {
-    // Находим активное состояние для места
-    const state = this.getSlagFieldStateByPlaceId(placeId)
-    if (!state || state.state !== "BucketEmptied") return false
-
-    // Получаем информацию о месте и ковше для записи в историю
-    const place = this.getPlace(placeId)
-    const bucket = this.getBucket(state.bucketId)
-    const material = this.getMaterial(state.materialId)
-
-    if (place) {
-      // Добавляем запись в историю в структурированном виде
-      const historyRecord: HistoryRecord = {
-        id: this.generateId(),
-        timestamp: new Date(),
-        action: "removeBucket",
-        entityType: "slagField",
-        placeId: placeId,
-        placeRow: place.row,
-        placeNumber: place.number,
-        bucketId: state.bucketId,
-        bucketName: bucket?.name || "Неизвестный ковш",
-        materialId: state.materialId,
-        materialName: material?.name || "Неизвестный материал",
-        weight: state.weight, // Сохраняем вес из состояния
-        operationTime: new Date(),
-        placementTime: state.startDate,
-        emptyTime: state.endDate,
-      }
-
-      this.userHistory.push(historyRecord)
-      this.saveToStorage()
-    }
-
-    // Удаляем состояние
-    return this.deleteSlagFieldState(state.id)
-  }
-
-  // Обновляем метод invalidateState, чтобы сохранять вес в истории
-  public invalidateState(data: { placeId: string; description: string }): boolean {
-    // Находим активное состояние для места
-    const state = this.getSlagFieldStateByPlaceId(data.placeId)
-    if (!state) return false
-
-    // Получаем информацию о месте для записи в историю
-    const place = this.getPlace(data.placeId)
-    const bucket = this.getBucket(state.bucketId)
-    const material = this.getMaterial(state.materialId)
-
-    if (place) {
-      // Добавляем запись в историю в структурированном виде
-      const historyRecord: HistoryRecord = {
-        id: this.generateId(),
-        timestamp: new Date(),
-        action: "invalidateState",
-        entityType: "slagField",
-        placeId: data.placeId,
-        placeRow: place.row,
-        placeNumber: place.number,
-        bucketId: state.bucketId,
-        bucketName: bucket?.name || "Неизвестный ковш",
-        materialId: state.materialId,
-        materialName: material?.name || "Неизвестный материал",
-        weight: state.weight, // Сохраняем вес из состояния
-        operationTime: new Date(),
-        placementTime: state.startDate,
-        reason: data.description,
-      }
-
-      this.userHistory.push(historyRecord)
-      this.saveToStorage()
-    }
-
-    // Удаляем состояние
-    return this.deleteSlagFieldState(state.id)
-  }
-
-  // Получение расширенных данных о состояниях с информацией о ковшах и материалах
-  public getEnrichedSlagFieldStates(): (SlagFieldState & { bucketDescription?: string; materialName?: string })[] {
-    return this.slagFieldStates.map((state) => {
-      const bucket = this.getBucket(state.bucketId)
-      const material = this.getMaterial(state.materialId)
-
-      return {
-        ...state,
-        bucketDescription: bucket?.name,
-        materialName: material?.name,
-      }
-    })
-  }
 }
 
-// Экспортируем экземпляр класса
-export const dataStore = DataStore.getInstance()
+// Создаем экземпляр хранилища данных
+export const dataStore = new DataStore()
 
 // Экспортируем методы для работы с настройками материалов
 export const addMaterialSetting = dataStore.addMaterialSetting.bind(dataStore)

@@ -1,20 +1,31 @@
 export interface SlagFieldPlace {
   id: string
-  row: number
-  number: number
-  isEnable: boolean
+  row?: number | string
+  number?: number
+  isEnable?: boolean
+  name?: string
+  description?: string
+  coordinates?: { x: number; y: number }
+  status?: string
+  isDelete?: boolean
+  events?: any[]
 }
 
 export interface Bucket {
   id: string
-  name: string
-  isDelete: boolean
+  name?: string
+  description?: string
+  isDelete?: boolean
+  capacity?: number
+  status?: string
 }
 
 export interface Material {
   id: string
   name: string
   isDelete: boolean
+  description?: string
+  type?: string
 }
 
 export interface MaterialSetting {
@@ -24,17 +35,31 @@ export interface MaterialSetting {
   visualStateCode: string
   minHours?: number
   maxHours?: number
+  name?: string
+  description?: string
+  minTemperature?: number
+  maxTemperature?: number
+  minWeight?: number
+  maxWeight?: number
 }
 
 export interface SlagFieldState {
   id: string
   placeId: string
-  state: "BucketPlaced" | "BucketEmptied"
+  state?: "BucketPlaced" | "BucketEmptied" | "BucketRemoved" | "Invalid"
   bucketId: string
   materialId: string
   startDate: Date
   endDate: Date | null
   weight: number
+  status?: string
+  description?: string
+  bucketDescription?: string
+  materialName?: string
+  place?: SlagFieldPlace
+  bucket?: Bucket
+  material?: Material
+  slagWeight?: number
 }
 
 // Базовая запись истории
@@ -117,9 +142,9 @@ export interface PlaceStatusHistoryRecord extends BaseHistoryRecord {
 
 // Объединенный тип для всех записей истории
 export type HistoryRecord =
-  | BaseHistoryRecord
-  | PlaceBucketHistoryRecord
-  | EmptyBucketHistoryRecord
-  | RemoveBucketHistoryRecord
-  | InvalidateStateHistoryRecord
-  | PlaceStatusHistoryRecord
+    | BaseHistoryRecord
+    | PlaceBucketHistoryRecord
+    | EmptyBucketHistoryRecord
+    | RemoveBucketHistoryRecord
+    | InvalidateStateHistoryRecord
+    | PlaceStatusHistoryRecord

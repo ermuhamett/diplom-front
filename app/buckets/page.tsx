@@ -41,6 +41,8 @@ export default function BucketsPage() {
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
   const [selectedBucket, setSelectedBucket] = useState<Bucket | null>(null)
+  // Добавим состояние для отслеживания загрузки при операциях
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const [formData, setFormData] = useState({
     name: "",
@@ -87,7 +89,9 @@ export default function BucketsPage() {
       // Find the place to get its row and number
       const place = places.find((p) => p.id === activeState.placeId)
       if (place) {
-        const placeNumber = place.row * 100 + place.number
+        // Обработка случая, когда row может быть строкой или числом
+        const row = typeof place.row === "string" ? Number.parseInt(place.row) : place.row || 0
+        const placeNumber = row * 100 + (place.number || 0)
         return {
           isInUse: true,
           placeNumber,
@@ -105,10 +109,14 @@ export default function BucketsPage() {
     }
   }
 
+  // Обновляем обработчик добавления ковша
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     try {
+      // Показываем индикатор загрузки
+      setIsSubmitting(true)
+
       const newBucket = await addBucket({
         name: formData.name,
         isDelete: false,
@@ -123,20 +131,27 @@ export default function BucketsPage() {
         description: `Ковш "${formData.name}" успешно добавлен`,
       })
     } catch (error) {
+      console.error("Error adding bucket:", error)
       toast({
         title: "Ошибка",
-        description: "Не удалось добавить ковш",
+        description: "Не удалось добавить ковш. Проверьте подключение к серверу.",
         variant: "destructive",
       })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
+  // Обновляем обработчик редактирования ковша
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!selectedBucket) return
 
     try {
+      // Показываем индикатор загрузки
+      setIsSubmitting(true)
+
       const updatedBucket = await updateBucket(selectedBucket.id, {
         name: formData.name,
       })
@@ -152,11 +167,14 @@ export default function BucketsPage() {
         description: `Ковш успешно обновлен`,
       })
     } catch (error) {
+      console.error("Error updating bucket:", error)
       toast({
         title: "Ошибка",
-        description: "Не удалось обновить ковш",
+        description: "Не удалось обновить ковш. Проверьте подключение к серверу.",
         variant: "destructive",
       })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -177,11 +195,14 @@ export default function BucketsPage() {
     setIsDeleteDialogOpen(true)
   }
 
-  // Упростим функцию handleDeleteSubmit, так как проверка уже выполнена
+  // Обновляем обработчик удаления ковша
   const handleDeleteSubmit = async () => {
     if (!selectedBucket) return
 
     try {
+      // Показываем индикатор загрузки
+      setIsSubmitting(true)
+
       const success = await deleteBucket(selectedBucket.id)
 
       if (success) {
@@ -208,203 +229,231 @@ export default function BucketsPage() {
         })
       }
     } catch (error) {
+      console.error("Error deleting bucket:", error)
       toast({
         title: "Ошибка",
-        description: "Не удалось удалить ковш",
+        description: "Не удалось удалить ковш. Проверьте подключение к серверу.",
         variant: "destructive",
       })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
   const openEditDialog = (bucket: Bucket) => {
     setSelectedBucket(bucket)
     setFormData({
-      name: bucket.name,
+      name: bucket.name || bucket.description || "",
     })
     setIsEditDialogOpen(true)
   }
 
   if (loading) {
     return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-[80vh]">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-        </div>
-      </DashboardLayout>
+        <DashboardLayout>
+          <div className="flex items-center justify-center h-[80vh]">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          </div>
+        </DashboardLayout>
     )
   }
 
   return (
-    <DashboardLayout>
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-            Справочник ковшей
-          </h1>
-          <Button onClick={() => setIsAddDialogOpen(true)}>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Добавить ковш
-          </Button>
-        </div>
+      <DashboardLayout>
+        <div className="flex flex-col gap-6">
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
+              Справочник ковшей
+            </h1>
+            <Button onClick={() => setIsAddDialogOpen(true)}>
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Добавить ковш
+            </Button>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Ковши</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Название</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead className="text-right">Действия</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {buckets
-                  .filter((bucket) => !bucket.isDelete)
-                  .map((bucket) => {
-                    const bucketStatus = getBucketStatus(bucket.id)
+          <Card>
+            <CardHeader>
+              <CardTitle>Ковши</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Название</TableHead>
+                    <TableHead>Статус</TableHead>
+                    <TableHead className="text-right">Действия</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {buckets
+                      .filter((bucket) => !bucket.isDelete)
+                      .map((bucket) => {
+                        const bucketStatus = getBucketStatus(bucket.id)
 
-                    return (
-                      <TableRow key={bucket.id}>
-                        <TableCell>{bucket.name}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {bucketStatus.isInUse ? (
-                              <>
+                        return (
+                            <TableRow key={bucket.id}>
+                              <TableCell>{bucket.name || bucket.description}</TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  {bucketStatus.isInUse ? (
+                                      <>
                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
                                   Используется
                                 </span>
-                                {bucketStatus.placeNumber && (
-                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
+                                        {bucketStatus.placeNumber && (
+                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
                                     {bucketStatus.placeNumber}
                                   </span>
-                                )}
-                              </>
-                            ) : (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                                        )}
+                                      </>
+                                  ) : (
+                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
                                 Не используется
                               </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(bucket)}>
-                            <Pencil className="h-4 w-4" />
-                            <span className="sr-only">Редактировать</span>
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => openDeleteDialog(bucket)}>
-                            <Trash className="h-4 w-4" />
-                            <span className="sr-only">Удалить</span>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button variant="ghost" size="icon" onClick={() => openEditDialog(bucket)}>
+                                  <Pencil className="h-4 w-4" />
+                                  <span className="sr-only">Редактировать</span>
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => openDeleteDialog(bucket)}>
+                                  <Trash className="h-4 w-4" />
+                                  <span className="sr-only">Удалить</span>
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                        )
+                      })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
 
-        {/* Add Dialog */}
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Добавить ковш</DialogTitle>
-              <DialogDescription>Введите описание нового ковша.</DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleAddSubmit}>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="name" className="text-right">
-                    Название
-                  </Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ name: e.target.value })}
-                    className="col-span-3"
-                    required
-                  />
+          {/* Add Dialog */}
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Добавить ковш</DialogTitle>
+                <DialogDescription>Введите описание нового ковша.</DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleAddSubmit}>
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="name" className="text-right">
+                      Название
+                    </Label>
+                    <Input
+                        id="name"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ name: e.target.value })}
+                        className="col-span-3"
+                        required
+                    />
+                  </div>
                 </div>
+                <DialogFooter>
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? (
+                        <>
+                          <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent"></div>
+                          Сохранение...
+                        </>
+                    ) : (
+                        "Сохранить"
+                    )}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          {/* Edit Dialog */}
+          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Редактировать ковш</DialogTitle>
+                <DialogDescription>Измените описание ковша.</DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleEditSubmit}>
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="edit-name" className="text-right">
+                      Название
+                    </Label>
+                    <Input
+                        id="edit-name"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ name: e.target.value })}
+                        className="col-span-3"
+                        required
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? (
+                        <>
+                          <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent"></div>
+                          Сохранение...
+                        </>
+                    ) : (
+                        "Сохранить"
+                    )}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          {/* Delete Dialog */}
+          <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Удалить ковш</DialogTitle>
+                <DialogDescription>
+                  Вы уверены, что хотите удалить этот ковш? Это действие нельзя отменить.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+                  Отмена
+                </Button>
+                <Button variant="destructive" onClick={handleDeleteSubmit} disabled={isSubmitting}>
+                  {isSubmitting ? (
+                      <>
+                        <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent"></div>
+                        Удаление...
+                      </>
+                  ) : (
+                      "Удалить"
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Error Dialog */}
+          <Dialog open={isErrorDialogOpen} onOpenChange={setIsErrorDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle className="flex items-center text-destructive">
+                  <AlertCircle className="h-5 w-5 mr-2" />
+                  Невозможно удалить
+                </DialogTitle>
+              </DialogHeader>
+              <div className="py-3">
+                <p>{errorMessage}</p>
               </div>
               <DialogFooter>
-                <Button type="submit">Сохранить</Button>
+                <Button variant="outline" onClick={() => setIsErrorDialogOpen(false)}>
+                  Понятно
+                </Button>
               </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-
-        {/* Edit Dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Редактировать ковш</DialogTitle>
-              <DialogDescription>Измените описание ковша.</DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleEditSubmit}>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="edit-name" className="text-right">
-                    Название
-                  </Label>
-                  <Input
-                    id="edit-name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ name: e.target.value })}
-                    className="col-span-3"
-                    required
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="submit">Сохранить</Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-
-        {/* Delete Dialog */}
-        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Удалить ковш</DialogTitle>
-              <DialogDescription>
-                Вы уверены, что хотите удалить этот ковш? Это действие нельзя отменить.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-                Отмена
-              </Button>
-              <Button variant="destructive" onClick={handleDeleteSubmit}>
-                Удалить
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Error Dialog */}
-        <Dialog open={isErrorDialogOpen} onOpenChange={setIsErrorDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle className="flex items-center text-destructive">
-                <AlertCircle className="h-5 w-5 mr-2" />
-                Невозможно удалить
-              </DialogTitle>
-            </DialogHeader>
-            <div className="py-3">
-              <p>{errorMessage}</p>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsErrorDialogOpen(false)}>
-                Понятно
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-    </DashboardLayout>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </DashboardLayout>
   )
 }
