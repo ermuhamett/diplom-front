@@ -372,15 +372,33 @@ class DataStore {
     // Запись в историю
     const place = this.getPlace(placeId)
     const bucket = this.getBucket(updatedState.bucketId)
-    if (place && bucket) {
-      this.addToHistory(
-          "emptyBucket",
-          "slagField",
-          updatedState.id,
-          `Ковш ${bucket.name} опустошен на месте ${place.row}-${place.number}`
-      )
-    }
 
+    const material = this.getMaterial(updatedState.materialId)
+
+    if (place && bucket && material) {
+      // Создаем запись в истории с типом emptyBucket
+      const historyRecord: HistoryRecord = {
+        id: uuidv4(),
+        timestamp: new Date(),
+        action: "emptyBucket",
+        entityType: "slagField",
+        entityId: updatedState.id,
+        placeId: placeId,
+        placeRow: typeof place.row === "string" ? Number.parseInt(place.row) : place.row || 0,
+        placeNumber: place.number || 0,
+        bucketId: bucket.id,
+        bucketName: bucket.name || bucket.description || "",
+        materialId: material.id,
+        materialName: material.name,
+        weight: updatedState.weight,
+        operationTime: new Date(),
+        emptyTime: endDate,
+        placementTime: new Date(updatedState.startDate),
+        details: `Ковш ${bucket.name} опустошен на месте ${place.row}-${place.number}`,
+      }
+
+      this.userHistory.push(historyRecord)
+    }
     this.saveToStorage()
     return updatedState
   }

@@ -27,6 +27,9 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
+
+const COOLING_TIME_MS = 5 * 60 * 1000 // 5 минут
+
 export default function SlagFieldPage() {
   const { toast } = useToast()
   const [places, setPlaces] = useState<SlagFieldPlace[]>([])
@@ -85,8 +88,33 @@ export default function SlagFieldPage() {
   }, [toast])
 
   const getPlaceState = (placeId: string) => {
-    return states.find((s) => s.placeId === placeId && s.endDate === null)
+    // теперь найдём ОДНУ запись для места — любую, какая есть
+    return states.find((s) => s.placeId === placeId)
   }
+
+  // Вынесем логику формирования сообщения о времени охлаждения
+  const notifyCoolingNotFinished = (placeState: SlagFieldState) => {
+    // 1) берем все настройки этого материала
+    const settings = materialSettings.filter(
+        (s) => s.materialId === placeState.materialId
+    );
+    // 2) находим последнюю (максимальную) стадию охлаждения
+    const lastStage = settings.reduce((latest, cur) =>
+            cur.maxHours !== undefined && (!latest || cur.maxHours! > latest.maxHours!) ? cur : latest
+        , settings[0]);
+    // 3) собираем текст
+    const materialName = placeState.materialName || "материала";
+    let message = `Время охлаждения ${materialName} ещё не завершилось.`;
+    if (lastStage?.minHours !== undefined) {
+      message += ` Опустошение возможно после ${lastStage.minHours} часов.`;
+    }
+    // 4) показываем тост
+    toast({
+      title: "Невозможно опустошить ковш",
+      description: message,
+      variant: "destructive",
+    });
+  };
 
   // Исправим функцию getElapsedTime, чтобы таймер начинался с 00:00
   const getElapsedTime = (startDate: Date | string) => {
@@ -121,35 +149,27 @@ export default function SlagFieldPage() {
   }
 
   // Функция для проверки, можно ли опустошить ковш
-  const canEmptyBucket = (placeId: string) => {
-    const placeState = getPlaceState(placeId)
-    if (!placeState || placeState.state !== "BucketPlaced") return false
+  const canEmptyBucket = (ps?: SlagFieldState): boolean => {
+    if (!ps || ps.state !== "BucketPlaced") return false
 
-    // Получаем настройки материала
-    const materialSettingsForMaterial = materialSettings.filter(
-        (setting) => setting.materialId === placeState.materialId,
-    )
+    // Берём все настройки по материалу
+    const cfg = materialSettings.filter((s) => s.materialId === ps.materialId)
+    // Максимальная длительность в часах
+    const maxDurationHours = (cfg[0]?.duration ?? 0) / 60
+    // Прошло часов с начала
+    const elapsed = getElapsedHours(ps.startDate)
 
-    // Находим максимальную длительность для этого материала
-    const maxDuration = materialSettingsForMaterial.length > 0 ? materialSettingsForMaterial[0].duration : 0
-    const maxDurationHours = maxDuration / 60 // Convert minutes to hours
+    // Последняя стадия по minHours
+    const lastStage = cfg.reduce((acc, cur) =>
+            cur.minHours !== undefined && (!acc || cur.minHours! > acc.minHours!)
+                ? cur
+                : acc
+        , cfg[0])
 
-    // Проверяем, прошло ли достаточно времени
-    const elapsedHours = getElapsedHours(placeState.startDate)
+    const canByStage = lastStage?.minHours !== undefined && elapsed >= lastStage.minHours
+    const canByMax   = elapsed >= maxDurationHours
 
-    // Находим последнюю стадию охлаждения (обычно зеленый цвет)
-    const lastStage = materialSettingsForMaterial.reduce((latest, setting) => {
-      if (setting.maxHours !== undefined && (!latest || setting.maxHours > latest.maxHours!)) {
-        return setting
-      }
-      return latest
-    }, materialSettingsForMaterial[0])
-
-    // Проверяем, находится ли время в последней стадии или превышено
-    const isInLastStage = lastStage && lastStage.minHours !== undefined && elapsedHours >= lastStage.minHours
-    const isOverTime = elapsedHours >= maxDurationHours
-
-    return isInLastStage || isOverTime
+    return canByStage || canByMax
   }
 
   const handlePlaceBucket = async (data: any) => {
@@ -197,15 +217,13 @@ export default function SlagFieldPage() {
       setLoading(true)
 
       // Проверяем, можно ли опустошить ковш
-      if (!selectedPlace || !canEmptyBucket(selectedPlace.id)) {
-        toast({
-          title: "Невозможно опустошить ковш",
-          description: `Время охлаждения материала еще не завершилось. Опустошение возможно только на последней стадии охлаждения.`,
-          variant: "destructive",
-        })
-        //setLoading(false)
-        setIsEmptyBucketOpen(false)
-        return
+      const ps = getPlaceState(selectedPlace?.id || "");
+      if (!ps || !canEmptyBucket(ps)) {
+        notifyCoolingNotFinished(ps!);
+        alert("Not ready for empty");
+        //setLoading(false);
+        setIsEmptyBucketOpen(false);
+        return;
       }
 
       const success = await emptyBucket({
@@ -219,7 +237,7 @@ export default function SlagFieldPage() {
 
         // Обновляем состояние вручную, чтобы гарантировать, что оно изменится на "BucketEmptied"
         const updatedStates = statesData.map((state) => {
-          if (state.placeId === selectedPlace?.id) {
+          if (state.placeId === selectedPlace?.id && state.endDate === null) {
             return {
               ...state,
               state: "BucketEmptied",
@@ -509,7 +527,10 @@ export default function SlagFieldPage() {
       bucketDescription: state.bucketDescription || "Неизвестный ковш",
       materialName: state.materialName || "Неизвестный материал",
       startDate: new Date(state.startDate).toLocaleString(),
-      weight: (state.weight / 1000).toFixed(2) + " т",
+      endDate: state.endDate
+          ? new Date(state.endDate).toLocaleString()
+          : undefined,
+      weight: (state.weight / 1000).toFixed(2) + " кг",
       state: state.state || "Неизвестно",
       elapsedTime,
       elapsedHours: elapsedHours.toFixed(1),
@@ -530,7 +551,8 @@ export default function SlagFieldPage() {
 
       // Если ковш опорожнен, показываем изображение пустого ковша
       if (placeState?.state === "BucketEmptied") {
-        return <img src="/images/empty_bucket.png" alt="Опорожнен" className="h-16 w-16 sm:h-16 sm:w-16" />
+
+        return <img src="/images/empty_bucket.png" alt="Опустошен" className="h-16 w-16 sm:h-16 sm:w-16" />
       }
 
       // Place has a bucket - show appropriate image based on state and material setting
@@ -636,7 +658,7 @@ export default function SlagFieldPage() {
         menu.appendChild(placeItem)
       }
 
-      // Если ковш установлен (BucketPlaced), показываем опцию "Опорожнить ковш"
+      // Если ковш установлен (BucketPlaced), показываем опцию "Опустошить ковш"
       if (placeState?.state === "BucketPlaced") {
         const emptyItem = document.createElement("div")
         emptyItem.className = menuItemClass
@@ -644,15 +666,12 @@ export default function SlagFieldPage() {
             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" class="mr-2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> Опустошить ковш'
         emptyItem.onclick = () => {
           document.body.removeChild(menu)
-          if (!canEmptyBucket(place.id)) {
-            toast({
-              title: "Невозможно опустошить ковш",
-              description: `Время охлаждения материала еще не завершилось. Опустошение возможно только на последней стадии охлаждения.`,
-              variant: "destructive",
-            })
+          const ps = getPlaceState(place.id)
+          if(!ps) return; // нет состояния — ничего не делаем
+          if (!canEmptyBucket(ps)) {
+            notifyCoolingNotFinished(ps);
             return
           }
-
           setIsEmptyBucketOpen(true)
         }
         menu.appendChild(emptyItem)
@@ -813,7 +832,7 @@ export default function SlagFieldPage() {
                                           <div className="flex flex-col items-center h-full">
                                             {/* Фиксированная высота для верхней части (для времени) */}
                                             <div className="h-6 flex items-center justify-center mb-1">
-                                              {elapsedTime && (
+                                              {placeState?.state === "BucketPlaced" && elapsedTime && (
                                                   <div className="text-xs font-medium text-white bg-primary px-2 py-0.5 rounded-md shadow-sm">
                                                     {elapsedTime}
                                                   </div>
@@ -900,17 +919,29 @@ export default function SlagFieldPage() {
                           <div className="font-medium text-muted-foreground">Дата установки:</div>
                           <div>{stateInfo.startDate}</div>
 
-                          <div className="font-medium text-muted-foreground">Прошло времени:</div>
-                          <div>
-                            {stateInfo.elapsedTime} ({stateInfo.elapsedHours} ч)
-                          </div>
-
-                          {stateInfo.exceedsMaxDuration && (
+                          {/* если ковш ещё в процессе — показываем таймер и предупреждение */}
+                          {stateInfo.state === "BucketPlaced" && (
                               <>
-                                <div className="font-medium text-red-500">Внимание:</div>
-                                <div className="text-red-500 font-semibold">
-                                  Превышено максимальное время ({stateInfo.maxDurationHours} ч)
+                                <div className="font-medium text-muted-foreground">Прошло времени:</div>
+                                <div>
+                                  {stateInfo.elapsedTime} ({stateInfo.elapsedHours} ч)
                                 </div>
+                                {stateInfo.exceedsMaxDuration && (
+                                    <>
+                                      <div className="font-medium text-red-500">Внимание:</div>
+                                      <div className="text-red-500 font-semibold">
+                                        Превышено максимальное время ({stateInfo.maxDurationHours} ч)
+                                      </div>
+                                    </>
+                                )}
+                              </>
+                          )}
+
+                          {/* если ковш уже опустошён — вместо таймера показываем дату опустошения */}
+                          {stateInfo.state === "BucketEmptied" && (
+                              <>
+                                <div className="font-medium text-muted-foreground">Дата опустошения:</div>
+                                <div>{stateInfo.endDate}</div>
                               </>
                           )}
 

@@ -1,5 +1,5 @@
 import { axiosApi } from "./network-utils"
-import type { SlagFieldPlace, Bucket, SlagFieldState } from "./types"
+import type {SlagFieldPlace, Bucket, SlagFieldState, RawHistoryEvent} from "./types"
 
 // API для работы с местами
 export const PlacesApi = {
@@ -118,8 +118,8 @@ export const SlagFieldApi = {
     },
 
     // Получить состояние шлакового поля на определенный момент времени
-    getStateSnapshot: async (timestamp: Date): Promise<SlagFieldState[]> => {
-        return axiosApi<SlagFieldState[]>(`/slagfield/state/snapshot?timestamp=${timestamp.toISOString()}`)
+    getStateSnapshot: async (timestamp: Date): Promise<RawHistoryEvent[]> => {
+        return axiosApi<RawHistoryEvent[]>(`/slagfield/state/snapshot?timestamp=${timestamp.toISOString()}`)
     },
 
     // Установить ковш

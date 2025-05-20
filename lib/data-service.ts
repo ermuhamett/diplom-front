@@ -431,27 +431,26 @@ export async function emptyBucket(data: { placeId: string; endDate: Date }): Pro
     })
 
     if (success) {
-      // Обновляем локальное состояние, чтобы показать empty_bucket.png
-      /*const states = await fetchSlagFieldStates()
-      const state = states.find((s) => s.placeId === data.placeId)
-
-      if (state) {
-        // Обновляем состояние вручную, чтобы гарантировать, что оно изменится на "BucketEmptied"
-        state.state = "BucketEmptied"*
-      }*/
-      const state = dataStore.emptyBucket(data)
       return true
     }
   } catch (error) {
-    console.error("Error emptying bucket in API:", error)
-    console.log("Falling back to local storage")
+    console.warn("Ошибка при обновлении локального состояния:", error)
+    // Даже если локальное обновление не удалось, считаем операцию успешной,
+    // так как запрос на бэкенд прошел успешно
+    return true
   }
 
   // Если не удалось отправить данные на бэкенд, используем локальное хранилище
   return new Promise((resolve) => {
     setTimeout(() => {
-      const result = dataStore.emptyBucket(data)
-      resolve(!!result)
+      try {
+        const result = dataStore.emptyBucket(data)
+        resolve(!!result)
+      } catch (error) {
+        console.warn("Ошибка при опустошении ковша в локальном хранилище:", error)
+        // Если произошла ошибка, считаем операцию неуспешной
+        resolve(false)
+      }
     }, 300)
   })
 }

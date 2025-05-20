@@ -10,6 +10,18 @@ export interface SlagFieldPlace {
   isDelete?: boolean
   events?: any[]
 }
+export interface RawHistoryEvent {
+  eventId: string
+  placeId: string
+  eventType: string
+  timestamp: string
+  bucketId?: string
+  materialId?: string
+  slagWeight?: number
+  clientStartDate?: string
+  bucketEmptiedTime?: string
+  description?: string
+}
 
 export interface Bucket {
   id: string
