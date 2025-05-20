@@ -5,6 +5,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/lib/auth" // Import without file extension
 import { ProtectedRoute } from "@/components/protected-route"
+import {Providers} from "@/app/providers";
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -26,11 +27,13 @@ export default function RootLayout({
         <meta name="timezone" content="Asia/Almaty" />
       </head>
       <body className={inter.className}>
+      <Providers>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <AuthProvider>
             <ProtectedRoute>{children}</ProtectedRoute>
           </AuthProvider>
         </ThemeProvider>
+      </Providers>
       </body>
     </html>
   )
