@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
+  reactStrictMode: false,
+  experimental: {
+    turbo: true, // включает Turbopack
+  },
   swcMinify: true,
   images: {
     domains: ['images.unsplash.com'],
@@ -12,6 +15,6 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-}
+};
 
-export default nextConfig
+export default nextConfig;
